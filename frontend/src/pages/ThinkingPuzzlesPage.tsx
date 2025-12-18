@@ -121,12 +121,23 @@ export function ThinkingPuzzlesPage() {
                   Q{idx + 1}
                 </div>
 
-                {/* ★ 这里显示题目文本 */}
-                <p className="mb-2 whitespace-pre-wrap text-slate-900">
-                  {q.question && q.question.trim().length > 0
-                    ? q.question
-                    : "（問題文が取得できませんでした）"}
-                </p>
+              <p className="mb-2 whitespace-pre-wrap text-slate-900">
+                      {q.question && q.question.trim().length > 0
+                     ? q.question
+                    : (() => {
+                   try {
+                 // question が空なら、answer/explanation 以外の情報を全部まとめて表示（デバッグ＆暫定表示用）
+                  const { answer, explanation, ...rest } = q as any;
+                  const text = JSON.stringify(rest, null, 2);
+                    return text.length > 0
+                     ? text
+                    : "（問題文が取得できませんでした）";
+                       } catch {
+                      return "（問題文が取得できませんでした）";
+                       }
+                           })()}
+                             </p>
+
 
                 <button
                   type="button"
