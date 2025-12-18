@@ -3,7 +3,10 @@ import json
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-import openai
+import os
+from openai import OpenAI
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 from app.core.config import settings
 
@@ -89,28 +92,23 @@ def build_homework_prompt(body: CheckHomeworkRequest) -> str:
     return prompt
 
 
-def call_llm_for_homework(prompt: str) -> dict:
-    if not settings.openai_api_key:
-        raise HTTPException(status_code=500, detail="OpenAI API key is not set.")
-
-    openai.api_key = settings.openai_api_key
-
-    completion = openai.ChatCompletion.create(
+def call_llm_for_homework(prompt: str):
+    completion = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "あなたは JSON だけを返す日本語教師です。"},
-            {"role": "user", "content": prompt},
+            {
+                "role": "system",
+                "content": "你是一个小学生作业辅导老师，返回 JSON 格式..."
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
         ],
         temperature=0.2,
     )
-
-    content = completion.choices[0].message["content"]
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="LLM出力のJSON解析に失敗しました。")
-
-    return data
+    # 新版字段路径也变了
+    return completion.choices[0].message.content
 
 
 @router.post("/check_homework", response_model=CheckHomeworkResponse)
