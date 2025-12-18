@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+body {
+  /* 这行相当于原来的 bg-slate-50，手写成普通 CSS 就行 */
+  background-color: #f8fafc;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+
