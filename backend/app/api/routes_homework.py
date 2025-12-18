@@ -1,14 +1,15 @@
 from typing import Literal, Optional, List
 import json
+import os
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-import os
 from openai import OpenAI
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from app.core.config import settings  # 先保留，后面需要的话可以用 settings 里的配置
 
-from app.core.config import settings
+# OpenAI クライアント（環境変数から API キー取得）
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 router = APIRouter()
 
@@ -37,6 +38,7 @@ class CheckHomeworkResponse(BaseModel):
 
 
 def build_homework_prompt(body: CheckHomeworkRequest) -> str:
+    # 「小4」→ "4" みたいに数字だけ抜き出す（なければ 3 年生想定）
     numeric_grade = "".join([c for c in body.grade if c.isdigit()]) or "3"
 
     subject_desc_map = {
@@ -92,13 +94,18 @@ def build_homework_prompt(body: CheckHomeworkRequest) -> str:
     return prompt
 
 
-def call_llm_for_homework(prompt: str):
+def call_llm_for_homework(prompt: str) -> str:
+    """LLM を呼び出して、生の JSON 文字列（のはず）を返す"""
     completion = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {
                 "role": "system",
-                "content": "你是一个小学生作业辅导老师，返回 JSON 格式..."
+                "content": (
+                    "あなたは日本の小学生向けの先生です。"
+                    "出力は必ず JSON 1 つだけにしてください。"
+                    "説明文や感想など、JSON 以外のテキストは書かないでください。"
+                ),
             },
             {
                 "role": "user",
@@ -107,7 +114,7 @@ def call_llm_for_homework(prompt: str):
         ],
         temperature=0.2,
     )
-    # 新版字段路径也变了
+    # 新 SDK: content は基本 string で返ってくる想定
     return completion.choices[0].message.content
 
 
@@ -116,15 +123,38 @@ async def check_homework(body: CheckHomeworkRequest):
     prompt = build_homework_prompt(body)
     raw = call_llm_for_homework(prompt)
 
-    result = CheckHomeworkResult(
-        correct=bool(raw.get("correct", False)),
-        score=float(raw.get("score", 0.0)),
-        correct_answer_example=raw.get("correct_answer_example", "").strip(),
-        feedback_message=raw.get("feedback_message", "").strip(),
-        hint=raw.get("hint", "").strip(),
-        difficulty=raw.get("difficulty"),
-        topic_tags=raw.get("topic_tags"),
-    )
+    # raw は LLM が返した「JSON 文字列」なので、まずパースする
+    try:
+        if not isinstance(raw, str):
+            # 念のため、list などで返ってきたときも安全側に寄せておく
+            raw_str = json.dumps(raw, ensure_ascii=False)
+        else:
+            raw_str = raw
+
+        parsed = json.loads(raw_str)
+    except json.JSONDecodeError:
+        # LLM が変なフォーマットを返したとき
+        raise HTTPException(
+            status_code=500,
+            detail="LLMからの応答をJSONとして解析できませんでした。",
+        )
+
+    # parsed を Pydantic モデルにマッピング
+    try:
+        result = CheckHomeworkResult(
+            correct=bool(parsed.get("correct", False)),
+            score=float(parsed.get("score", 0.0)),
+            correct_answer_example=str(parsed.get("correct_answer_example", "")).strip(),
+            feedback_message=str(parsed.get("feedback_message", "")).strip(),
+            hint=str(parsed.get("hint", "")).strip(),
+            difficulty=parsed.get("difficulty"),
+            topic_tags=parsed.get("topic_tags"),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"LLMからの応答を評価用データに変換できませんでした: {e}",
+        )
 
     return CheckHomeworkResponse(
         grade=body.grade,
