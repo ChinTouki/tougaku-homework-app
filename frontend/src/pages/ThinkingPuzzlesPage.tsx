@@ -121,7 +121,7 @@ export function ThinkingPuzzlesPage() {
                   Q{idx + 1}
                 </div>
 
-                {/* ★ ここで問題文を表示する */}
+                {/* ★ 这里显示题目文本 */}
                 <p className="mb-2 whitespace-pre-wrap text-slate-900">
                   {q.question && q.question.trim().length > 0
                     ? q.question
