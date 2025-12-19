@@ -1,3 +1,4 @@
+// frontend/src/pages/HomeworkPage.tsx
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { checkHomework } from "../api/homework";
@@ -31,6 +32,7 @@ const HomeworkPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-md mx-auto space-y-4">
+        {/* ヘッダー行：タイトル＋思考力ページへの導線 */}
         <div className="flex justify-between items-center">
           <h1 className="text-lg font-bold text-slate-900">
             宿題チェック（試作）
@@ -47,7 +49,19 @@ const HomeworkPage: React.FC = () => {
           問題文とお子さまの答えを入力すると、AIが〇×とヒントを返します。
         </p>
 
-        <div className="flex gap-2 text-xs">
+        {/* 📸 宿題カメラへのボタン */}
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => navigate("/camera")}
+            className="w-full rounded-full bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-900"
+          >
+            📸 宿題カメラでチェック
+          </button>
+        </div>
+
+        {/* 学年・教科の選択 */}
+        <div className="flex gap-2 text-xs mt-2">
           <select
             value={grade}
             onChange={(e) => setGrade(e.target.value)}
@@ -70,6 +84,7 @@ const HomeworkPage: React.FC = () => {
           </select>
         </div>
 
+        {/* 問題文 */}
         <textarea
           className="w-full border rounded-lg p-2 text-sm"
           rows={3}
@@ -78,6 +93,7 @@ const HomeworkPage: React.FC = () => {
           onChange={(e) => setQuestion(e.target.value)}
         />
 
+        {/* お子さまの答え */}
         <textarea
           className="w-full border rounded-lg p-2 text-sm"
           rows={3}
@@ -86,6 +102,7 @@ const HomeworkPage: React.FC = () => {
           onChange={(e) => setAnswer(e.target.value)}
         />
 
+        {/* チェックボタン */}
         <button
           onClick={handleCheck}
           disabled={loading}
@@ -94,6 +111,7 @@ const HomeworkPage: React.FC = () => {
           {loading ? "チェック中…" : "AIにチェックしてもらう"}
         </button>
 
+        {/* 結果表示 */}
         {result && (
           <div className="bg-white rounded-lg p-3 border text-xs space-y-1">
             <div>
