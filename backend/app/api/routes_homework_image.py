@@ -74,84 +74,49 @@ def _extract_structured_items(data_url: str, subject: str) -> dict:
     ここは正誤判定しない。抽出に集中させる。
     """
     prompt = f"""
-あなたは日本の小学生の宿題（手書きノート）を読み取る専門家です。
-画像から「題番号」「問題文」「子どもの答え」をできるだけ正確に抽出してください。
+あなたは日本の小学生の宿題（写真）を読み取る専門家です。
 
-制約：
-- 学年は不要（推定したければ detected_grade に入れてよい）
-- subject は {subject}（auto の場合は推定）
-- 1ページに複数の設問がある想定
-- 文字が読めない場合は推測せず、「不明」と書いてよい
-- 余計な文章は禁止。JSON のみ。
+この作業は、主に【印刷された問題 + 子どもの手書きの答え】で構成されています
+（例：公文式、学校配布のプリント）。
+一部、【ノートに自由に書かれた手書き】が含まれる場合もあります。
 
-出力フォーマット（JSONのみ）：
+次の優先順位で内容を解析してください。
+
+【優先順位 1：印刷された宿題（B1）】
+- 問題番号を探してください（例：①、1.、(1)、No.1 など）
+- 問題文は主に印刷文字です
+- 子どもの答えは次の場所に書かれていることが多いです：
+  - 横線の上
+  - 四角い枠の中
+  - 問題文の近くの空白
+- 「印刷された問題文」と「子どもの手書きの答え」を必ず分けてください
+
+【優先順位 2：自由な手書き（B2・補助的）】
+- 明確な問題番号や印刷構造が見当たらない場合
+- 1行（または1まとまり）を1問として解析してください
+- 不確実な場合は無理に判断せず、簡潔に処理してください
+
+ルール：
+- 読み取れない文字は推測しないでください。「不明」と記載してください
+- 正解・不正解の判断は行いません（この段階では抽出のみ）
+- 学年は推定してもよいですが、不明な場合は null で構いません
+- subject は {subject} です（auto の場合は内容から判断してください）
+- 必ず JSON 形式のみを出力し、説明文やコメントは一切書かないでください
+
+出力形式（JSON）：
 {{
   "subject": "国語/算数/英語/理科",
-  "detected_grade": "小1〜小6（推定、不要なら null）",
+  "detected_grade": "小1〜小6（推定。不明な場合は null）",
   "items": [
     {{
       "id": 1,
-      "question_text": "読み取った問題文（不明なら短く不明と）",
-      "child_answer": "読み取った子どもの答え（不明なら不明）"
+      "question_text": "読み取った問題文（印刷または手書き。不明な場合は簡潔に『不明』）",
+      "child_answer": "読み取った子どもの答え（不明な場合は『不明』）"
     }}
   ]
 }}
 """
 
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        temperature=0.0,
-        messages=[
-            {"role": "system", "content": "必ずJSONだけを返してください。"},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ],
-    )
-    raw = completion.choices[0].message.content
-    return json.loads(raw)
-
-
-def _grade_and_feedback(items_json: dict) -> dict:
-    """
-    抽出した items をもとに、正誤判定＋ヒント＋似た問題を生成する段階。
-    """
-    prompt = f"""
-あなたは日本の小学生向けの先生です。
-次の items は、手書きノートから抽出した「問題文」と「子どもの答え」です。
-各設問について採点し、ヒントと似た練習問題を作ってください。
-
-items:
-{json.dumps(items_json, ensure_ascii=False)}
-
-出力フォーマット（JSONのみ）：
-{{
-  "subject": "国語/算数/英語/理科",
-  "detected_grade": "小1〜小6（推定）",
-  "problems": [
-    {{
-      "id": 1,
-      "question_text": "...",
-      "child_answer": "...",
-      "correct": true,
-      "score": 1.0,
-      "feedback": "短いコメント",
-      "hint": "答えを直接言わないヒント",
-      "similar_practice": [
-        {{
-          "question": "似た問題",
-          "answer": "答え",
-          "explanation": "解説"
-        }}
-      ]
-    }}
-  ]
-}}
-"""
 
     completion = client.chat.completions.create(
         model="gpt-4o-mini",
