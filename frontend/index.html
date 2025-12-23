@@ -9,7 +9,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#fbbf24" />
 
-    <!-- iOS 用設定 -->
+    <!-- iOS / Android PWA 設定 -->
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta
@@ -17,9 +17,11 @@
       content="black-translucent"
     />
     <meta name="apple-mobile-web-app-title" content="宿題チェック" />
+    <!-- Android/他ブラウザ向け -->
+    <meta name="mobile-web-app-capable" content="yes" />
 
-    <!-- Favicon（Vite デフォルトのままでもOK） -->
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
   </head>
   <body class="bg-slate-50">
     <div id="root"></div>

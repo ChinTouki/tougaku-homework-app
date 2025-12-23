@@ -5,6 +5,7 @@ import { checkHomework } from "../api/homework";
 
 const HomeworkPage: React.FC = () => {
   const navigate = useNavigate();
+
   const [grade, setGrade] = useState("小4");
   const [subject, setSubject] =
     useState<"国語" | "算数" | "英語" | "思考力">("算数");
@@ -12,10 +13,17 @@ const HomeworkPage: React.FC = () => {
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleCheck = async () => {
-    if (!question || !answer) return;
+    if (!question || !answer) {
+      setErrorMsg("問題文とお子さまの答えを入力してください。");
+      return;
+    }
+
     setLoading(true);
+    setErrorMsg(null);
+
     try {
       const data = await checkHomework({
         grade,
@@ -24,6 +32,9 @@ const HomeworkPage: React.FC = () => {
         child_answer: answer,
       });
       setResult(data.result);
+    } catch (err) {
+      console.error("check_homework error:", err);
+      setErrorMsg("チェックに失敗しました。時間をおいて再度お試しください。");
     } finally {
       setLoading(false);
     }
@@ -32,7 +43,7 @@ const HomeworkPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-md mx-auto space-y-4">
-        {/* ヘッダー行：タイトル＋思考力ページへの導線 */}
+        {/* 头部 + 导航 */}
         <div className="flex justify-between items-center">
           <h1 className="text-lg font-bold text-slate-900">
             宿題チェック（試作）
@@ -45,23 +56,21 @@ const HomeworkPage: React.FC = () => {
           </button>
         </div>
 
+        {/* 摄像头入口按钮 */}
+        <button
+          type="button"
+          onClick={() => navigate("/camera")}
+          className="w-full rounded-full bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-900"
+        >
+          📸 宿題カメラでチェック
+        </button>
+
         <p className="text-xs text-slate-600">
           問題文とお子さまの答えを入力すると、AIが〇×とヒントを返します。
         </p>
 
-        {/* 📸 宿題カメラへのボタン */}
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => navigate("/camera")}
-            className="w-full rounded-full bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-900"
-          >
-            📸 宿題カメラでチェック
-          </button>
-        </div>
-
-        {/* 学年・教科の選択 */}
-        <div className="flex gap-2 text-xs mt-2">
+        {/* 学年 & 科目 */}
+        <div className="flex gap-2 text-xs">
           <select
             value={grade}
             onChange={(e) => setGrade(e.target.value)}
@@ -84,7 +93,7 @@ const HomeworkPage: React.FC = () => {
           </select>
         </div>
 
-        {/* 問題文 */}
+        {/* 问题输入 */}
         <textarea
           className="w-full border rounded-lg p-2 text-sm"
           rows={3}
@@ -93,7 +102,7 @@ const HomeworkPage: React.FC = () => {
           onChange={(e) => setQuestion(e.target.value)}
         />
 
-        {/* お子さまの答え */}
+        {/* 答案输入 */}
         <textarea
           className="w-full border rounded-lg p-2 text-sm"
           rows={3}
@@ -102,7 +111,14 @@ const HomeworkPage: React.FC = () => {
           onChange={(e) => setAnswer(e.target.value)}
         />
 
-        {/* チェックボタン */}
+        {/* 错误消息 */}
+        {errorMsg && (
+          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            {errorMsg}
+          </div>
+        )}
+
+        {/* 检查按钮 */}
         <button
           onClick={handleCheck}
           disabled={loading}
@@ -111,18 +127,22 @@ const HomeworkPage: React.FC = () => {
           {loading ? "チェック中…" : "AIにチェックしてもらう"}
         </button>
 
-        {/* 結果表示 */}
+        {/* 结果显示 */}
         {result && (
-          <div className="bg-white rounded-lg p-3 border text-xs space-y-1">
+          <div className="bg-white rounded-lg p-3 border text-xs space-y-1 mt-2">
             <div>
               判定:{" "}
               <span className="font-semibold">
                 {result.correct ? "正解" : "まちがいあり"}
               </span>{" "}
-              （{Math.round(result.score * 100)}%）
+              （{Math.round((result.score || 0) * 100)}%）
             </div>
-            <div>説明: {result.feedback_message}</div>
-            <div className="text-amber-700">ヒント: {result.hint}</div>
+            {result.feedback_message && (
+              <div>説明: {result.feedback_message}</div>
+            )}
+            {result.hint && (
+              <div className="text-amber-700">ヒント: {result.hint}</div>
+            )}
             {result.correct_answer_example && (
               <div className="mt-1">
                 模範解答例: {result.correct_answer_example}

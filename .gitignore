@@ -1,14 +1,18 @@
 # Python
-backend/__pycache__/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# venv / env
+.venv/
 backend/.venv/
-backend/*.pyc
-
-# Env files
-backend/.env
 .env
+backend/.env
 
-# Node modules
+# Node
+node_modules/
 frontend/node_modules/
-
-# Build outputs
+dist/
 frontend/dist/
+
