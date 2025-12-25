@@ -36,7 +36,6 @@ const HomeworkCameraPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [result, setResult] = useState<CheckImageResponse | null>(null);
-  const [openPracticeIds, setOpenPracticeIds] = useState<number[]>([]);
 
   /* ========= 文件选择 ========= */
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
