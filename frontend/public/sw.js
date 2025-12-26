@@ -1,16 +1,12 @@
 // frontend/public/sw.js
+// 安全版本：不拦截页面路由，不拦截 API
 
 self.addEventListener("install", (event) => {
-  // 立即激活新的 SW
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
-  // 将来可以在这里清理旧缓存
-  clients.claim();
+  event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener("fetch", (event) => {
-  // 现在先不做缓存，全部放行给网络
-  return;
-});
+// ⚠️ 不要拦截 fetch（让浏览器自己处理路由）
