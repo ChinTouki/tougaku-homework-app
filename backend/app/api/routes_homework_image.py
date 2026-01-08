@@ -55,135 +55,31 @@ def safe_json_parse(text: str) -> dict:
     return json.loads(cleaned[start:end + 1])
 
 
-# ======================
-# Step 0：是否有学习内容（关键）
-# ======================
+def infer_subject_from_text(text: str) -> str:
+    """
+    非常稳定的规则判定（工程解）
+    """
+    if not text:
+        return "不明"
 
-def has_learning_content(data_url: str) -> bool:
-    prompt = """
-この画像に「学習内容（文字・数字・記号）」が写っていますか？
+    # 英语：字母占比明显
+    latin = len(re.findall(r"[A-Za-z]", text))
+    kana = len(re.findall(r"[ぁ-んァ-ン一-龯]", text))
+    digits = len(re.findall(r"[0-9]", text))
 
-【判断基準】
-- ひらがな・カタカナ・漢字
-- アルファベット
-- 数字、計算式、□、線
-- 教材・プリント・ノート
+    if latin >= 3 and latin > kana:
+        return "英语"
 
-机、床、壁、白紙だけの場合は「NO」。
+    # 算数：数字/运算符明显
+    if digits >= 2 or re.search(r"[＋\-×÷=]", text):
+        return "算数"
 
-出力（JSONのみ）：
-{
-  "has_content": true または false
-}
-"""
+    # 国语：日文为主
+    if kana >= 3:
+        return "国语"
 
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        temperature=0.0,
-        messages=[
-            {"role": "system", "content": "JSONのみを返してください。"},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ],
-    )
-
-    parsed = safe_json_parse(completion.choices[0].message.content)
-    return bool(parsed.get("has_content", False))
-
-
-# ======================
-# Step 1：学科强制分类（不允许不明）
-# ======================
-
-def classify_subject(data_url: str) -> str:
-    prompt = """
-次の教科の中から、最も近いものを1つ選んでください。
-
-【選択肢】
-- 国語
-- 算数
-- 英語
-- 理科
-
-※ 少しでも当てはまれば必ず1つ選ぶこと
-※ 推測でよい
-
-出力（JSONのみ）：
-{
-  "subject": "国語 | 算数 | 英語 | 理科"
-}
-"""
-
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        temperature=0.0,
-        messages=[
-            {"role": "system", "content": "JSONのみを返してください。"},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ],
-    )
-
-    parsed = safe_json_parse(completion.choices[0].message.content)
-    return parsed.get("subject", "国語")
-
-
-# ======================
-# Step 2：作业识别
-# ======================
-
-def analyze_homework(data_url: str, subject: str) -> dict:
-    prompt = f"""
-あなたは日本の小学生の{subject}の宿題をチェックする先生です。
-
-【ルール】
-- 必ず画像に写っている内容のみを使う
-- 読めない部分は「不明」
-- 推測は禁止
-
-【出力（JSONのみ）】
-{{
-  "detected_grade": "小1〜小6 または null",
-  "problems": [
-    {{
-      "id": 1,
-      "question_text": "問題文（不明なら '不明'）",
-      "child_answer": "子どもの答え（不明なら '不明'）",
-      "correct": true または false,
-      "score": 0.0〜1.0,
-      "feedback": "短い先生コメント",
-      "hint": "答えを直接言わないヒント"
-    }}
-  ]
-}}
-"""
-
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        temperature=0.2,
-        messages=[
-            {"role": "system", "content": "JSONのみを返してください。"},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ],
-    )
-
-    return safe_json_parse(completion.choices[0].message.content)
+    # 兜底：最常见
+    return "国语"
 
 
 # ======================
@@ -195,25 +91,72 @@ async def check_homework_image(image: UploadFile = File(...)):
     img_bytes = await image.read()
     data_url = image_to_data_url(image, img_bytes)
 
+    # ===== Vision Prompt（只做一件事：读内容）=====
+    prompt = """
+你是一个OCR+老师助手。
+
+【规则】
+- 只做一件事：从图片中读取“问题内容”和“孩子的答案”
+- 读不到就写“不明”
+- 不要判断学科
+- 不要举例
+- 不要补全
+
+【输出（JSONのみ）】
+{
+  "detected_grade": "小1〜小6 または null",
+  "problems": [
+    {
+      "id": 1,
+      "question_text": "从图片读取到的题目",
+      "child_answer": "从图片读取到的孩子答案",
+      "correct": true 或 false,
+      "score": 0.0〜1.0,
+      "feedback": "基于图片内容的简短老师评语",
+      "hint": "不直接给答案的提示"
+    }
+  ]
+}
+"""
+
     try:
-        # Step 0：是否有学习内容
-        if not has_learning_content(data_url):
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": "只返回JSON。"},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+        )
+
+        raw = completion.choices[0].message.content
+        parsed = safe_json_parse(raw)
+
+        problems = parsed.get("problems", [])
+        if not problems:
             return {
                 "subject": "不明",
                 "detected_grade": None,
                 "problems": []
             }
 
-        # Step 1：强制学科分类
-        subject = classify_subject(data_url)
+        # 👉 用“读出来的题目文本”稳定判定学科
+        all_text = " ".join(
+            p.get("question_text", "") for p in problems
+        )
 
-        # Step 2：作业识别
-        analysis = analyze_homework(data_url, subject)
+        subject = infer_subject_from_text(all_text)
 
         return {
             "subject": subject,
-            "detected_grade": analysis.get("detected_grade"),
-            "problems": analysis.get("problems", [])
+            "detected_grade": parsed.get("detected_grade"),
+            "problems": problems
         }
 
     except Exception:
