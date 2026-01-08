@@ -28,6 +28,34 @@ interface CheckImageResponse {
   problems: DetectedProblem[];
 }
 
+const compressImage = (file: File): Promise<Blob> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d")!;
+
+    img.onload = () => {
+      const maxW = 1280;
+      const scale = Math.min(1, maxW / img.width);
+
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob(
+        (blob) => {
+          resolve(blob!);
+        },
+        "image/jpeg",
+        0.7 // 质量
+      );
+    };
+
+    img.src = URL.createObjectURL(file);
+  });
+};
+
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -59,7 +87,13 @@ const HomeworkCameraPage: React.FC = () => {
     setErrorMsg(null);
 
     const formData = new FormData();
-    formData.append("image", file);
+    const compressed = await compressImage(file);
+    setErrorMsg("写真を確認しています…");
+    const compressed = await compressImage(file);
+    setErrorMsg("問題を読み取っています…");
+formData.append("image", compressed, "homework.jpg");
+
+
     formData.append("subject", "算数"); // 后面可改为 auto
 
     try {
