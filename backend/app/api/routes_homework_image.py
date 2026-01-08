@@ -62,20 +62,32 @@ def safe_json_parse(text: str) -> dict:
 
 def detect_subject(data_url: str) -> str:
     """
-    只判断学科，不读题，不判对错
+    教材/作业友好型学科判定（宽进）
     """
     prompt = """
-あなたは画像を見て「教科」だけを判断する分類器です。
+あなたは日本の小学生の「宿題・教材」の画像を見て、
+最も可能性の高い教科を1つだけ選ぶ分類器です。
 
-【判断基准】
-- 英語：アルファベット（A-Z / a-z）、英単語、英文
-- 国語：ひらがな・カタカナ・漢字中心の文章
-- 算数：数字、＋－×÷、＝、図形、計算式
-- 理科：実験、観察、植物・動物・天気などの語
+【重要な考え方】
+- 日本の教材は文字が少ない場合があります
+- 単語が1〜2個でも学習内容であれば教科を選んでください
+- 「完全に分からない」場合のみ「不明」にしてください
 
-【ルール】
-- 画像に学習内容が見当たらない場合は「不明」
-- 推測は禁止。見えた内容だけで判断
+【判断ヒント】
+- 算数：
+  数字、＋−×÷、＝、□、計算の並び、数の図
+- 英語：
+  アルファベット、英単語、"This / is / a / an" など
+  例：dog, apple, run, I am
+- 国語：
+  ひらがな、カタカナ、漢字、（　　　）や＿＿の空欄
+- 理科：
+  実験、観察、植物、動物、天気、図と説明文
+
+【出力ルール】
+- 学習内容が写っていると判断できる場合は、
+  多少あいまいでも最も近い教科を選ぶ
+- 机、床、白紙など明らかに学習内容がない場合のみ「不明」
 
 出力（JSONのみ）：
 {
@@ -102,54 +114,6 @@ def detect_subject(data_url: str) -> str:
     parsed = safe_json_parse(raw)
     return parsed.get("subject", "不明")
 
-
-# ======================
-# Step 2：作业识别（仅在学科明确时）
-# ======================
-
-def analyze_homework(data_url: str, subject: str) -> dict:
-    prompt = f"""
-あなたは日本の小学生の{subject}の宿題をチェックする先生です。
-
-【最重要ルール】
-- 必ず画像に写っている内容のみを使う
-- 読めない内容は「不明」と書く
-- 推測・補完は禁止
-
-【出力形式（JSONのみ）】
-{{
-  "detected_grade": "小1〜小6 または null",
-  "problems": [
-    {{
-      "id": 1,
-      "question_text": "画像から読み取れた問題文（不明なら '不明'）",
-      "child_answer": "画像から読み取れた答え（不明なら '不明'）",
-      "correct": true または false,
-      "score": 0.0〜1.0,
-      "feedback": "短い先生コメント",
-      "hint": "答えを直接言わないヒント"
-    }}
-  ]
-}}
-"""
-
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        temperature=0.2,
-        messages=[
-            {"role": "system", "content": "JSONのみを返してください。"},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ],
-    )
-
-    raw = completion.choices[0].message.content
-    return safe_json_parse(raw)
 
 
 # ======================
