@@ -86,11 +86,13 @@ const HomeworkCameraPage: React.FC = () => {
     setLoading(true);
     setErrorMsg(null);
 
-    const formData = new FormData();
-    const compressed = await compressImage(file);
     setErrorMsg("写真を確認しています…");
-    const compressed = await compressImage(file);
-    setErrorMsg("問題を読み取っています…");
+
+const compressed = await compressImage(file);
+
+setErrorMsg("問題を読み取っています…");
+
+const formData = new FormData();
 formData.append("image", compressed, "homework.jpg");
 
 
