@@ -1,5 +1,9 @@
-import os, json, base64
+import os
+import json
+import base64
+import re
 from typing import List, Optional
+
 from fastapi import APIRouter, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from openai import OpenAI
@@ -7,10 +11,10 @@ from openai import OpenAI
 router = APIRouter()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-class SimilarPractice(BaseModel):
-    question: str
-    answer: str
-    explanation: str
+
+# ======================
+# 数据结构
+# ======================
 
 class ImageProblemResult(BaseModel):
     id: int
@@ -20,30 +24,65 @@ class ImageProblemResult(BaseModel):
     score: float = Field(..., ge=0.0, le=1.0)
     feedback: str
     hint: str
-    # 注意：这里先不生成练习题（延迟到用户点的时候）
-    similar_practice: List[SimilarPractice] = []
+
 
 class CheckHomeworkImageResponse(BaseModel):
     subject: str
     detected_grade: Optional[str] = None
     problems: List[ImageProblemResult]
 
-def _img_to_data_url(image: UploadFile, img_bytes: bytes) -> str:
-    ct = image.content_type or "image/jpeg"
-    b64 = base64.b64encode(img_bytes).decode("utf-8")
-    return f"data:{ct};base64,{b64}"
 
-@router.post("/check_homework_image", response_model=CheckHomeworkImageResponse)
+# ======================
+# 工具函数
+# ======================
+
+def image_to_data_url(image: UploadFile, img_bytes: bytes) -> str:
+    content_type = image.content_type or "image/jpeg"
+    b64 = base64.b64encode(img_bytes).decode("utf-8")
+    return f"data:{content_type};base64,{b64}"
+
+
+def safe_json_parse(text: str) -> dict:
+    """
+    从 LLM 输出中安全提取 JSON
+    - 容忍 ```json ``` 包裹
+    - 容忍前后说明文字
+    """
+    if not text:
+        raise ValueError("empty response")
+
+    # 去掉 ```json ``` 包裹
+    cleaned = re.sub(r"```json|```", "", text, flags=re.IGNORECASE).strip()
+
+    # 提取最外层 JSON
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("no json found")
+
+    json_str = cleaned[start:end + 1]
+    return json.loads(json_str)
+
+
+# ======================
+# API Endpoint
+# ======================
+
+@router.post(
+    "/check_homework_image",
+    response_model=CheckHomeworkImageResponse
+)
 async def check_homework_image(
     subject: Optional[str] = Form(None),
-    image: UploadFile = File(...),
+    image: UploadFile = File(...)
 ):
     subj = subject or "auto"
 
     img_bytes = await image.read()
-    data_url = _img_to_data_url(image, img_bytes)
+    data_url = image_to_data_url(image, img_bytes)
 
-    # 单次 Vision Prompt（抽题 + 初步判定）
+    # ===== Vision Prompt（禁止编造，必须基于图片）=====
     prompt = f"""
 あなたは日本の小学生の宿題をチェックする先生です。
 
@@ -69,7 +108,7 @@ async def check_homework_image(
 【注意】
 - 学年は推定してもよいが、確信がなければ null
 - subject は {subj}（auto の場合は内容から判断）
-- 画像内に問題が見つからない場合は problems を空配列にする
+- 画像内に問題が見つからない場合は problems を空配列 [] にする
 
 【出力形式】
 以下の JSON 形式のみを返してください。説明文は禁止です。
@@ -90,26 +129,40 @@ async def check_homework_image(
   ]
 }}
 
-【最後の確認】
+【最終確認】
 - この JSON の内容は、必ずこの画像に基づいていますか？
 - 画像を見ずに答えていませんか？
 """
 
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": "JSONだけを返してください。"},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+        )
 
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        temperature=0.2,
-        messages=[
-            {"role": "system", "content": "JSONだけを返してください。"},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ],
-    )
+        raw = completion.choices[0].message.content
+        parsed = safe_json_parse(raw)
 
-    raw = completion.choices[0].message.content
-    return json.loads(raw)
+        # 如果模型没有识别到问题，保证结构正确
+        if "problems" not in parsed or not isinstance(parsed["problems"], list):
+            parsed["problems"] = []
+
+        return parsed
+
+    except Exception as e:
+        # ⚠️ 失败时不要抛 500，返回“识别不到”的正常结构
+        return {
+            "subject": subj if subj != "auto" else "算数",
+            "detected_grade": None,
+            "problems": []
+        }
