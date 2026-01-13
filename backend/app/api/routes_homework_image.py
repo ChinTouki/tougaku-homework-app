@@ -2,7 +2,7 @@ import os
 import re
 import base64
 import json
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, UploadFile, File
 from openai import OpenAI
@@ -11,7 +11,7 @@ router = APIRouter()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # =========================
-# 安全 JSON 解析（永不 500）
+# 安全 JSON 解析
 # =========================
 
 def safe_parse_json(text: str) -> dict:
@@ -30,11 +30,33 @@ def safe_parse_json(text: str) -> dict:
         return {}
 
 # =========================
-# 算式安全计算
+# 表达式标准化（关键）
+# =========================
+
+def normalize_expression(expr: str) -> str:
+    """
+    把人写的算式统一成 Python 可算形式
+    """
+    expr = expr.replace("×", "*").replace("÷", "/")
+    expr = expr.replace("−", "-")
+
+    # 处理带分数：3 1/2 -> 3.5
+    mixed = re.match(r"(\d+)\s+(\d+)/(\d+)", expr)
+    if mixed:
+        whole = int(mixed.group(1))
+        num = int(mixed.group(2))
+        den = int(mixed.group(3))
+        expr = str(whole + num / den)
+
+    return expr.strip()
+
+# =========================
+# 安全计算
 # =========================
 
 def eval_expression(expr: str) -> str:
     try:
+        expr = normalize_expression(expr)
         if not re.match(r"^[0-9+\-*/(). ]+$", expr):
             return ""
         result = eval(expr, {"__builtins__": {}})
@@ -45,115 +67,40 @@ def eval_expression(expr: str) -> str:
         return ""
 
 # =========================
-# 错因分类（A3）
-# =========================
-
-def classify_math_error(expr: str, student: str, correct: str) -> str:
-    try:
-        a = int(student)
-        b = int(correct)
-    except Exception:
-        return "計算ミス"
-
-    # 加减的进位/借位
-    if "+" in expr or "-" in expr:
-        if abs(a - b) == 10:
-            return "繰り上がり・繰り下がり"
-
-    # 乘法表
-    if "*" in expr or "×" in expr:
-        return "九九の間違い"
-
-    return "計算ミス"
-
-# =========================
-# 年级友好错因提示（A7）
-# =========================
-
-def format_error_message(error_type: str, grade: Optional[str]) -> str:
-    if not grade:
-        return error_type
-
-    if grade in ["小1", "小2"]:
-        return "ゆっくり計算してみよう"
-
-    return error_type
-
-# =========================
-# 生成类似练习题（A6）
-# =========================
-
-def generate_similar_exercises(expr: str, error_type: str) -> List[str]:
-    exercises: List[str] = []
-
-    try:
-        if error_type == "九九の間違い":
-            base = int(expr.split("*")[0])
-            exercises = [
-                f"{base} * 2 = ?",
-                f"{base} * 3 = ?",
-                f"{base} * 4 = ?",
-            ]
-
-        elif error_type == "繰り上がり・繰り下がり":
-            exercises = [
-                "18 + 7 = ?",
-                "24 - 9 = ?",
-                "36 + 8 = ?",
-            ]
-
-        else:
-            exercises = [
-                "7 + 6 = ?",
-                "9 - 4 = ?",
-                "5 * 3 = ?",
-            ]
-    except Exception:
-        exercises = ["3 + 5 = ?", "8 - 2 = ?", "4 * 6 = ?"]
-
-    return exercises
-
-# =========================
-# API：算数拍照批改（A1+A5+A6+A7）
+# API：算数拍照批改（多题支持）
 # =========================
 
 @router.post("/check_homework_image")
 async def check_homework_image(image: UploadFile = File(...)):
-    """
-    算数専用・拍照批改 API
-
-    返回内容：
-    - is_correct（用于前端画圈/叉）
-    - error_message（按年级友好化）
-    - similar_exercises（错题练习）
-    """
     try:
-        # 读取图片
         img_bytes = await image.read()
         ct = image.content_type or "image/jpeg"
         b64 = base64.b64encode(img_bytes).decode("utf-8")
         data_url = f"data:{ct};base64,{b64}"
 
-        # 算数特化 Prompt（弱推断，稳定）
         prompt = """
 你是一个小学算数作业批改助手。
 
-请只做以下事情：
-1. 从图片中找出所有算数算式（可能有多行）
-2. 提取算式（不包含等号右边）
+【非常重要】
+- 图片中每一行算式都要单独识别
+- 不要合并，不要省略
+- 即使算式复杂，也要原样提取
+
+【要做的事】
+1. 按“行”拆解所有算式
+2. 提取算式（等号左边）
 3. 提取学生写的答案（等号右边）
 
-只处理加减乘除。
-不处理国语或英语。
-不解释，不扩展。
+【支持】
+- 分数（如 3 1/2）
+- × ÷
 
-返回 JSON：
+【输出 JSON】
 {
-  "detected_grade": "小1〜小6 または null",
   "items": [
     {
-      "expression": "3 + 5",
-      "student_answer": "9"
+      "expression": "3 1/2 + 2",
+      "student_answer": "5 1/2"
     }
   ]
 }
@@ -161,7 +108,7 @@ async def check_homework_image(image: UploadFile = File(...)):
 
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
-            temperature=0.3,
+            temperature=0.2,
             messages=[
                 {"role": "system", "content": "只返回JSON"},
                 {
@@ -176,36 +123,24 @@ async def check_homework_image(image: UploadFile = File(...)):
 
         parsed = safe_parse_json(completion.choices[0].message.content)
         items = parsed.get("items", [])
-        detected_grade = parsed.get("detected_grade")
 
         problems = []
 
         for it in items:
-            expr = it.get("expression", "").strip()
+            raw_expr = it.get("expression", "").strip()
             student = it.get("student_answer", "").strip()
-            correct = eval_expression(expr)
 
-            if not expr or not student or not correct:
+            if not raw_expr or not student:
                 continue
 
-            is_correct = student == correct
-            error_type = ""
-            error_message = ""
-            similar_exercises: List[str] = []
-
-            if not is_correct:
-                error_type = classify_math_error(expr, student, correct)
-                error_message = format_error_message(error_type, detected_grade)
-                similar_exercises = generate_similar_exercises(expr, error_type)
+            correct = eval_expression(raw_expr)
+            is_correct = correct != "" and student.replace(" ", "") == correct.replace(" ", "")
 
             problems.append({
-                "expression": expr,
+                "expression": raw_expr,
                 "student_answer": student,
                 "correct_answer": correct,
                 "is_correct": is_correct,
-                "error_type": error_type,
-                "error_message": error_message,
-                "similar_exercises": similar_exercises,
             })
 
         summary = {
@@ -220,12 +155,7 @@ async def check_homework_image(image: UploadFile = File(...)):
         }
 
     except Exception:
-        # 任何异常都不允许影响前端
         return {
             "problems": [],
-            "summary": {
-                "total": 0,
-                "correct": 0,
-                "wrong": 0,
-            },
+            "summary": {"total": 0, "correct": 0, "wrong": 0},
         }
