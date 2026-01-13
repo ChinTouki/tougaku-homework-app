@@ -31,94 +31,62 @@ def safe_parse_json(text: str) -> dict:
         return {}
 
 # =========================
-# 表达式标准化
+# 分数解析（关键）
 # =========================
 
-def normalize_expression(expr: str) -> str:
-    expr = expr.replace("×", "*").replace("÷", "/").replace("−", "-")
-
-    # 带分数：3 1/2 → Fraction(7,2)
-    mixed = re.match(r"(\d+)\s+(\d+)/(\d+)", expr)
-    if mixed:
-        whole = int(mixed.group(1))
-        num = int(mixed.group(2))
-        den = int(mixed.group(3))
-        return f"Fraction({whole * den + num},{den})"
-
-    # 普通分数：1/3 → Fraction(1,3)
-    expr = re.sub(
-        r"(\d+)\s*/\s*(\d+)",
-        r"Fraction(\1,\2)",
-        expr
-    )
-
-    return expr.strip()
-
-# =========================
-# 精确计算（分数）
-# =========================
-
-def eval_expression(expr: str) -> str:
+def parse_fraction(s: str) -> Fraction | None:
+    s = s.strip()
     try:
-        expr = normalize_expression(expr)
-        result = eval(expr, {"Fraction": Fraction})
+        # 带分数：3 1/2
+        m = re.match(r"(\d+)\s+(\d+)/(\d+)", s)
+        if m:
+            return Fraction(int(m.group(1)) * int(m.group(3)) + int(m.group(2)),
+                            int(m.group(3)))
 
-        if isinstance(result, Fraction):
-            # 整数
-            if result.denominator == 1:
-                return str(result.numerator)
+        # 普通分数：1/3
+        m = re.match(r"(\d+)/(\d+)", s)
+        if m:
+            return Fraction(int(m.group(1)), int(m.group(2)))
 
-            # 带分数（小学生常用）
-            whole = result.numerator // result.denominator
-            rem = result.numerator % result.denominator
-            if whole > 0:
-                return f"{whole} {rem}/{result.denominator}"
-
-            # 真分数
-            return f"{result.numerator}/{result.denominator}"
-
-        return str(result)
+        # 整数
+        return Fraction(int(s), 1)
     except Exception:
-        return ""
+        return None
+
+# =========================
+# 计算表达式（支持分数）
+# =========================
+
+def eval_expression(expr: str) -> Fraction | None:
+    try:
+        expr = expr.replace("×", "*").replace("÷", "/").replace("−", "-")
+
+        # 把 1/2 → Fraction(1,2)
+        expr = re.sub(
+            r"(\d+)\s*/\s*(\d+)",
+            r"Fraction(\1,\2)",
+            expr
+        )
+
+        return eval(expr, {"Fraction": Fraction})
+    except Exception:
+        return None
 
 # =========================
 # 错因分类
 # =========================
 
-def classify_math_error(expr: str, student: str, correct: str) -> str:
+def classify_math_error(expr: str) -> str:
     if "/" in expr:
         return "分数の計算ミス"
-
-    if "+" in expr or "-" in expr:
-        return "繰り上がり・繰り下がり"
-
     if "*" in expr:
         return "九九の間違い"
-
+    if "+" in expr or "-" in expr:
+        return "繰り上がり・繰り下がり"
     return "計算ミス"
 
 # =========================
-# 类似练习生成
-# =========================
-
-def generate_similar_exercises(expr: str, error_type: str) -> List[str]:
-    if error_type == "分数の計算ミス":
-        return [
-            "1/2 + 1/3 = ?",
-            "2 1/4 + 1/4 = ?",
-            "3/5 + 2/5 = ?",
-        ]
-
-    if error_type == "九九の間違い":
-        return ["6 × 4 = ?", "7 × 8 = ?", "9 × 3 = ?"]
-
-    if error_type == "繰り上がり・繰り下がり":
-        return ["18 + 7 = ?", "34 - 9 = ?", "56 + 8 = ?"]
-
-    return ["7 + 6 = ?", "9 - 4 = ?", "5 × 3 = ?"]
-
-# =========================
-# API：算数拍照批改（分数対応）
+# API：算数拍照批改（最终版）
 # =========================
 
 @router.post("/check_homework_image")
@@ -132,14 +100,12 @@ async def check_homework_image(image: UploadFile = File(...)):
         prompt = """
 你是小学算数作业批改助手。
 
-【必须遵守】
-- 按行识别所有算式
-- 提取算式（等号左边）
-- 提取学生答案（等号右边）
+请逐行识别图片中的所有算式：
+- 提取等号左边的算式
+- 提取等号右边学生的答案
 - 支持分数、带分数、× ÷
-- 不要合并算式，不要省略
 
-【输出 JSON】
+只返回 JSON：
 {
   "items": [
     {
@@ -172,30 +138,25 @@ async def check_homework_image(image: UploadFile = File(...)):
 
         for it in items:
             expr = it.get("expression", "").strip()
-            student = it.get("student_answer", "").strip()
-            if not expr or not student:
+            student_raw = it.get("student_answer", "").strip()
+
+            if not expr or not student_raw:
                 continue
 
-            correct = eval_expression(expr)
-            is_correct = student.replace(" ", "") == correct.replace(" ", "")
+            correct_val = eval_expression(expr)
+            student_val = parse_fraction(student_raw)
 
-            error_type = ""
-            error_message = ""
-            similar_exercises = []
+            if correct_val is None or student_val is None:
+                continue
 
-            if not is_correct:
-                error_type = classify_math_error(expr, student, correct)
-                error_message = error_type
-                similar_exercises = generate_similar_exercises(expr, error_type)
+            is_correct = correct_val == student_val
 
             problems.append({
                 "expression": expr,
-                "student_answer": student,
-                "correct_answer": correct,
+                "student_answer": student_raw,
+                "correct_answer": str(correct_val),
                 "is_correct": is_correct,
-                "error_type": error_type,
-                "error_message": error_message,
-                "similar_exercises": similar_exercises,
+                "error_type": "" if is_correct else classify_math_error(expr),
             })
 
         summary = {
