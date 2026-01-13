@@ -3,6 +3,7 @@ import re
 import base64
 import json
 from typing import List
+from fractions import Fraction
 
 from fastapi import APIRouter, UploadFile, File
 from openai import OpenAI
@@ -30,44 +31,94 @@ def safe_parse_json(text: str) -> dict:
         return {}
 
 # =========================
-# 表达式标准化（关键）
+# 表达式标准化
 # =========================
 
 def normalize_expression(expr: str) -> str:
-    """
-    把人写的算式统一成 Python 可算形式
-    """
-    expr = expr.replace("×", "*").replace("÷", "/")
-    expr = expr.replace("−", "-")
+    expr = expr.replace("×", "*").replace("÷", "/").replace("−", "-")
 
-    # 处理带分数：3 1/2 -> 3.5
+    # 带分数：3 1/2 → Fraction(7,2)
     mixed = re.match(r"(\d+)\s+(\d+)/(\d+)", expr)
     if mixed:
         whole = int(mixed.group(1))
         num = int(mixed.group(2))
         den = int(mixed.group(3))
-        expr = str(whole + num / den)
+        return f"Fraction({whole * den + num},{den})"
+
+    # 普通分数：1/3 → Fraction(1,3)
+    expr = re.sub(
+        r"(\d+)\s*/\s*(\d+)",
+        r"Fraction(\1,\2)",
+        expr
+    )
 
     return expr.strip()
 
 # =========================
-# 安全计算
+# 精确计算（分数）
 # =========================
 
 def eval_expression(expr: str) -> str:
     try:
         expr = normalize_expression(expr)
-        if not re.match(r"^[0-9+\-*/(). ]+$", expr):
-            return ""
-        result = eval(expr, {"__builtins__": {}})
-        if isinstance(result, float) and result.is_integer():
-            result = int(result)
+        result = eval(expr, {"Fraction": Fraction})
+
+        if isinstance(result, Fraction):
+            # 整数
+            if result.denominator == 1:
+                return str(result.numerator)
+
+            # 带分数（小学生常用）
+            whole = result.numerator // result.denominator
+            rem = result.numerator % result.denominator
+            if whole > 0:
+                return f"{whole} {rem}/{result.denominator}"
+
+            # 真分数
+            return f"{result.numerator}/{result.denominator}"
+
         return str(result)
     except Exception:
         return ""
 
 # =========================
-# API：算数拍照批改（多题支持）
+# 错因分类
+# =========================
+
+def classify_math_error(expr: str, student: str, correct: str) -> str:
+    if "/" in expr:
+        return "分数の計算ミス"
+
+    if "+" in expr or "-" in expr:
+        return "繰り上がり・繰り下がり"
+
+    if "*" in expr:
+        return "九九の間違い"
+
+    return "計算ミス"
+
+# =========================
+# 类似练习生成
+# =========================
+
+def generate_similar_exercises(expr: str, error_type: str) -> List[str]:
+    if error_type == "分数の計算ミス":
+        return [
+            "1/2 + 1/3 = ?",
+            "2 1/4 + 1/4 = ?",
+            "3/5 + 2/5 = ?",
+        ]
+
+    if error_type == "九九の間違い":
+        return ["6 × 4 = ?", "7 × 8 = ?", "9 × 3 = ?"]
+
+    if error_type == "繰り上がり・繰り下がり":
+        return ["18 + 7 = ?", "34 - 9 = ?", "56 + 8 = ?"]
+
+    return ["7 + 6 = ?", "9 - 4 = ?", "5 × 3 = ?"]
+
+# =========================
+# API：算数拍照批改（分数対応）
 # =========================
 
 @router.post("/check_homework_image")
@@ -79,21 +130,14 @@ async def check_homework_image(image: UploadFile = File(...)):
         data_url = f"data:{ct};base64,{b64}"
 
         prompt = """
-你是一个小学算数作业批改助手。
+你是小学算数作业批改助手。
 
-【非常重要】
-- 图片中每一行算式都要单独识别
-- 不要合并，不要省略
-- 即使算式复杂，也要原样提取
-
-【要做的事】
-1. 按“行”拆解所有算式
-2. 提取算式（等号左边）
-3. 提取学生写的答案（等号右边）
-
-【支持】
-- 分数（如 3 1/2）
-- × ÷
+【必须遵守】
+- 按行识别所有算式
+- 提取算式（等号左边）
+- 提取学生答案（等号右边）
+- 支持分数、带分数、× ÷
+- 不要合并算式，不要省略
 
 【输出 JSON】
 {
@@ -127,20 +171,31 @@ async def check_homework_image(image: UploadFile = File(...)):
         problems = []
 
         for it in items:
-            raw_expr = it.get("expression", "").strip()
+            expr = it.get("expression", "").strip()
             student = it.get("student_answer", "").strip()
-
-            if not raw_expr or not student:
+            if not expr or not student:
                 continue
 
-            correct = eval_expression(raw_expr)
-            is_correct = correct != "" and student.replace(" ", "") == correct.replace(" ", "")
+            correct = eval_expression(expr)
+            is_correct = student.replace(" ", "") == correct.replace(" ", "")
+
+            error_type = ""
+            error_message = ""
+            similar_exercises = []
+
+            if not is_correct:
+                error_type = classify_math_error(expr, student, correct)
+                error_message = error_type
+                similar_exercises = generate_similar_exercises(expr, error_type)
 
             problems.append({
-                "expression": raw_expr,
+                "expression": expr,
                 "student_answer": student,
                 "correct_answer": correct,
                 "is_correct": is_correct,
+                "error_type": error_type,
+                "error_message": error_message,
+                "similar_exercises": similar_exercises,
             })
 
         summary = {
@@ -149,13 +204,7 @@ async def check_homework_image(image: UploadFile = File(...)):
             "wrong": sum(1 for p in problems if not p["is_correct"]),
         }
 
-        return {
-            "problems": problems,
-            "summary": summary,
-        }
+        return {"problems": problems, "summary": summary}
 
     except Exception:
-        return {
-            "problems": [],
-            "summary": {"total": 0, "correct": 0, "wrong": 0},
-        }
+        return {"problems": [], "summary": {"total": 0, "correct": 0, "wrong": 0}}
