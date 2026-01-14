@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes_homework_image import router as homework_image_router
+from app.api.routes_homework import router as homework_router
 
 app = FastAPI()
 
@@ -20,6 +20,6 @@ def health_check():
     return {"status": "ok"}
 
 app.include_router(
-    homework_image_router,
+    homework_router,
     prefix="/api",
 )
