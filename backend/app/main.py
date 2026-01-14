@@ -5,26 +5,24 @@ from app.api.routes_homework_image import router as homework_image_router
 
 app = FastAPI()
 
-# =========================
-# CORS 設定（1回だけ）
-# =========================
+# ===== CORS（必须）=====
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],        # ← 1回だけ
+    allow_origins=[
+        "https://tougaku-homework-frontend.onrender.com",
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# =========================
-# Render ヘルスチェック用
-# =========================
+# ===== Health Check =====
 @app.get("/")
 def health_check():
     return {"status": "ok"}
 
-# =========================
-# API ルーティング
-# =========================
+# ===== API =====
 app.include_router(
     homework_image_router,
     prefix="/api",
