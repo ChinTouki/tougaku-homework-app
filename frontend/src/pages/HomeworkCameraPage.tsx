@@ -5,134 +5,40 @@ import { apiClient } from "../api/client";
 /* ========= 类型 ========= */
 interface DebugResponse {
   raw_text: string;
-  error?: string;
 }
 
-interface Fraction {
-  n: number; // numerator
-  d: number; // denominator
+interface PracticeItem {
+  question: string;
+  userAnswer: string;
+  correct: boolean | null;
 }
 
-interface ParsedItem {
-  expression: string;
-  studentAnswer: string;
-  isCorrect: boolean;
-  correctAnswer: string;
-}
-
-/* ========= 分数字符串 → Fraction ========= */
-function parseFractionExact(str: string): Fraction | null {
-  try {
-    str = str.trim();
-
-    // 带分数：3 1/2
-    if (str.includes(" ")) {
-      const [w, f] = str.split(" ");
-      const [n, d] = f.split("/");
-      return {
-        n: parseInt(w) * parseInt(d) + parseInt(n),
-        d: parseInt(d),
-      };
-    }
-
-    // 普通分数：1/3
-    if (str.includes("/")) {
-      const [n, d] = str.split("/");
-      return { n: parseInt(n), d: parseInt(d) };
-    }
-
-    // 整数
-    return { n: parseInt(str), d: 1 };
-  } catch {
-    return null;
+/* ========= 生成类似练习题 ========= */
+function generatePractice(expr: string): string[] {
+  if (expr.includes("×")) {
+    return ["6 × 4 = ?", "7 × 3 = ?", "8 × 5 = ?"];
   }
+  if (expr.includes("÷")) {
+    return ["8 ÷ 2 = ?", "12 ÷ 3 = ?", "15 ÷ 5 = ?"];
+  }
+  if (expr.includes("+")) {
+    return ["7 + 6 = ?", "9 + 8 = ?", "5 + 7 = ?"];
+  }
+  if (expr.includes("-")) {
+    return ["15 - 7 = ?", "14 - 6 = ?", "20 - 9 = ?"];
+  }
+  return [];
 }
 
-/* ========= 最大公约数 ========= */
-function gcd(a: number, b: number): number {
-  return b === 0 ? Math.abs(a) : gcd(b, a % b);
-}
-
-/* ========= 约分 ========= */
-function normalizeFraction(f: Fraction): Fraction {
-  const g = gcd(f.n, f.d);
-  return { n: f.n / g, d: f.d / g };
-}
-
-/* ========= Fraction 相等判断 ========= */
-function fractionEqual(a: Fraction, b: Fraction): boolean {
-  const fa = normalizeFraction(a);
-  const fb = normalizeFraction(b);
-  return fa.n === fb.n && fa.d === fb.d;
-}
-
-/* ========= 表达式 → Fraction ========= */
-function evalExpressionExact(expr: string): Fraction | null {
+/* ========= 表达式计算 ========= */
+function evalSimple(expr: string): number | null {
   try {
-    let normalized = expr
-      .replace("×", "*")
-      .replace("÷", "/")
-      .replace(/(\d+)\s+(\d+)\/(\d+)/g, "($1*$3+$2)/$3");
-
-    // 普通分数
-    normalized = normalized.replace(
-      /(\d+)\s*\/\s*(\d+)/g,
-      "($1)/($2)"
-    );
-
+    const normalized = expr.replace("×", "*").replace("÷", "/");
     // eslint-disable-next-line no-eval
-    const val = eval(normalized);
-
-    // val 一定是 number，这里转成 Fraction
-    const str = val.toString();
-    if (str.includes(".")) {
-      const decimals = str.split(".")[1].length;
-      const d = Math.pow(10, decimals);
-      return normalizeFraction({
-        n: Math.round(val * d),
-        d,
-      });
-    }
-
-    return { n: val, d: 1 };
+    return eval(normalized);
   } catch {
     return null;
   }
-}
-
-/* ========= raw_text → 判定 ========= */
-function parseMathLines(raw: string): ParsedItem[] {
-  return raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.includes("="))
-    .map((line) => {
-      const [left, right] = line.split("=");
-      const expr = left.trim();
-      const student = right.trim();
-
-      const correctFrac = evalExpressionExact(expr);
-      const studentFrac = parseFractionExact(student);
-
-      let isCorrect = false;
-      let correctAnswer = "?";
-
-      if (correctFrac && studentFrac) {
-        isCorrect = fractionEqual(correctFrac, studentFrac);
-        if (correctFrac.d === 1) {
-          correctAnswer = correctFrac.n.toString();
-        } else {
-          correctAnswer = `${correctFrac.n}/${correctFrac.d}`;
-        }
-      }
-
-      return {
-        expression: expr,
-        studentAnswer: student,
-        isCorrect,
-        correctAnswer,
-      };
-    });
 }
 
 /* ========= 页面 ========= */
@@ -140,14 +46,16 @@ const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [result, setResult] = useState<DebugResponse | null>(null);
+  const [rawText, setRawText] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  const [practice, setPractice] = useState<PracticeItem[]>([]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] || null;
     setFile(f);
-    setResult(null);
     setPreview(f ? URL.createObjectURL(f) : null);
+    setRawText("");
+    setPractice([]);
   };
 
   const handleCheck = async () => {
@@ -162,11 +70,42 @@ const HomeworkCameraPage: React.FC = () => {
       formData
     );
 
-    setResult(res.data);
+    setRawText(res.data.raw_text);
     setLoading(false);
+
+    // 生成练习题（暂时：针对所有算式）
+    const lines = res.data.raw_text
+      .split("\n")
+      .filter((l) => l.includes("="));
+
+    const exercises: PracticeItem[] = [];
+    lines.forEach((line) => {
+      const expr = line.split("=")[0].trim();
+      generatePractice(expr).forEach((q) => {
+        exercises.push({
+          question: q,
+          userAnswer: "",
+          correct: null,
+        });
+      });
+    });
+
+    setPractice(exercises);
   };
 
-  const parsed = result?.raw_text ? parseMathLines(result.raw_text) : [];
+  const handleAnswer = (idx: number, value: string) => {
+    const q = practice[idx];
+    const correct = evalSimple(q.question.replace("= ?", ""));
+    const isCorrect = correct !== null && Number(value) === correct;
+
+    const updated = [...practice];
+    updated[idx] = {
+      ...q,
+      userAnswer: value,
+      correct: isCorrect,
+    };
+    setPractice(updated);
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 p-4">
@@ -194,28 +133,47 @@ const HomeworkCameraPage: React.FC = () => {
           {loading ? "読み取り中…" : "この写真でチェック"}
         </button>
 
-        {parsed.map((item, idx) => (
-          <div
-            key={idx}
-            className={`flex justify-between items-center border rounded-xl px-4 py-2 ${
-              item.isCorrect ? "bg-emerald-50" : "bg-red-50"
-            }`}
-          >
-            <div>
-              <div className="font-semibold">
-                {item.expression} = {item.studentAnswer}
-              </div>
-              {!item.isCorrect && (
-                <div className="text-xs text-slate-600">
-                  正しい答え：{item.correctAnswer}
-                </div>
-              )}
-            </div>
-            <div className="text-2xl font-bold">
-              {item.isCorrect ? "✔" : "✕"}
-            </div>
+        {/* 原始识别结果 */}
+        {rawText && (
+          <div className="bg-white border rounded p-3 text-sm whitespace-pre-wrap">
+            <div className="font-semibold mb-1">📄 読み取った内容</div>
+            {rawText}
           </div>
-        ))}
+        )}
+
+        {/* 练习题 */}
+        {practice.length > 0 && (
+          <div className="space-y-3">
+            <div className="font-semibold">✏️ まちがえた問題のれんしゅう</div>
+            {practice.map((p, i) => (
+              <div
+                key={i}
+                className={`border rounded p-3 ${
+                  p.correct === true
+                    ? "bg-emerald-50"
+                    : p.correct === false
+                    ? "bg-red-50"
+                    : "bg-white"
+                }`}
+              >
+                <div className="font-semibold">{p.question}</div>
+                <input
+                  type="number"
+                  className="mt-1 border rounded px-2 py-1 w-full"
+                  value={p.userAnswer}
+                  onChange={(e) => handleAnswer(i, e.target.value)}
+                  placeholder="答えを入力"
+                />
+                {p.correct === true && (
+                  <div className="text-emerald-600 text-sm">✔ 正解</div>
+                )}
+                {p.correct === false && (
+                  <div className="text-red-600 text-sm">✕ まちがい</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
