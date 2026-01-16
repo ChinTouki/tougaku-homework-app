@@ -2,12 +2,10 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "../api/client";
 
-/* ========= 后端返回 ========= */
 interface ApiResponse {
   raw_text: string;
 }
 
-/* ========= 判定结果 ========= */
 interface CheckedItem {
   expression: string;
   studentAnswer: string;
@@ -15,10 +13,30 @@ interface CheckedItem {
   correctAnswer: string;
 }
 
-/* ========= 分数结构 ========= */
 interface Fraction {
-  n: number; // numerator
-  d: number; // denominator
+  n: number;
+  d: number;
+}
+
+/* ========= Unicode 分数字符 → 普通分数 ========= */
+function normalizeUnicodeFractions(input: string): string {
+  const map: Record<string, string> = {
+    "½": "1/2",
+    "⅓": "1/3",
+    "⅔": "2/3",
+    "¼": "1/4",
+    "¾": "3/4",
+    "⅕": "1/5",
+    "⅖": "2/5",
+    "⅗": "3/5",
+    "⅘": "4/5",
+  };
+
+  let output = input;
+  for (const key in map) {
+    output = output.split(key).join(map[key]);
+  }
+  return output;
 }
 
 /* ========= 最大公约数 ========= */
@@ -26,8 +44,7 @@ function gcd(a: number, b: number): number {
   return b === 0 ? Math.abs(a) : gcd(b, a % b);
 }
 
-/* ========= 约分 ========= */
-function normalize(f: Fraction): Fraction {
+function normalizeFraction(f: Fraction): Fraction {
   const g = gcd(f.n, f.d);
   return { n: f.n / g, d: f.d / g };
 }
@@ -35,25 +52,22 @@ function normalize(f: Fraction): Fraction {
 /* ========= 分数字符串 → Fraction ========= */
 function parseFractionExact(str: string): Fraction | null {
   try {
-    const s = str.trim();
+    const s = normalizeUnicodeFractions(str.trim());
 
-    // 带分数：3 1/2
     if (s.includes(" ")) {
       const [w, f] = s.split(" ");
       const [n, d] = f.split("/");
-      return normalize({
+      return normalizeFraction({
         n: Number(w) * Number(d) + Number(n),
         d: Number(d),
       });
     }
 
-    // 普通分数：1/3
     if (s.includes("/")) {
       const [n, d] = s.split("/");
-      return normalize({ n: Number(n), d: Number(d) });
+      return normalizeFraction({ n: Number(n), d: Number(d) });
     }
 
-    // 整数
     return { n: Number(s), d: 1 };
   } catch {
     return null;
@@ -63,12 +77,11 @@ function parseFractionExact(str: string): Fraction | null {
 /* ========= 表达式 → Fraction ========= */
 function evalExpressionExact(expr: string): Fraction | null {
   try {
-    let normalized = expr
+    let normalized = normalizeUnicodeFractions(expr)
       .replace("×", "*")
       .replace("÷", "/")
       .replace(/(\d+)\s+(\d+)\/(\d+)/g, "($1*$3+$2)/$3");
 
-    // 普通分数
     normalized = normalized.replace(
       /(\d+)\s*\/\s*(\d+)/g,
       "($1)/($2)"
@@ -81,12 +94,11 @@ function evalExpressionExact(expr: string): Fraction | null {
       return { n: value, d: 1 };
     }
 
-    // 小数 → 分数（有限小数）
     const s = value.toString();
     if (s.includes(".")) {
       const len = s.split(".")[1].length;
       const d = Math.pow(10, len);
-      return normalize({ n: Math.round(value * d), d });
+      return normalizeFraction({ n: Math.round(value * d), d });
     }
 
     return null;
@@ -95,10 +107,10 @@ function evalExpressionExact(expr: string): Fraction | null {
   }
 }
 
-/* ========= Fraction 相等 ========= */
+/* ========= Fraction 比较 ========= */
 function fractionEqual(a: Fraction, b: Fraction): boolean {
-  const fa = normalize(a);
-  const fb = normalize(b);
+  const fa = normalizeFraction(a);
+  const fb = normalizeFraction(b);
   return fa.n === fb.n && fa.d === fb.d;
 }
 
@@ -139,7 +151,6 @@ function parseAndCheck(raw: string): CheckedItem[] {
 /* ========= 页面 ========= */
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
-
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [checked, setChecked] = useState<CheckedItem[]>([]);
@@ -177,10 +188,7 @@ const HomeworkCameraPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-md mx-auto space-y-4">
-        <button
-          onClick={() => navigate(-1)}
-          className="text-xs text-slate-500"
-        >
+        <button onClick={() => navigate(-1)} className="text-xs text-slate-500">
           ← 戻る
         </button>
 
@@ -203,15 +211,11 @@ const HomeworkCameraPage: React.FC = () => {
           {loading ? "読み取り中…" : "この写真でチェック"}
         </button>
 
-        {/* ===== 原题判定 ===== */}
         {checked.length > 0 && (
           <div className="bg-white rounded-xl border p-4 space-y-2">
             <div className="font-semibold">🧮 原題の結果</div>
             {checked.map((item, idx) => (
-              <div
-                key={idx}
-                className="flex justify-between items-center"
-              >
+              <div key={idx} className="flex justify-between">
                 <div>
                   {idx + 1}. {item.expression} = {item.studentAnswer}
                   {!item.isCorrect && (
