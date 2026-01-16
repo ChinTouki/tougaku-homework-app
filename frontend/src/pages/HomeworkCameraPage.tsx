@@ -2,10 +2,12 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "../api/client";
 
+/* ========= 后端返回 ========= */
 interface ApiResponse {
   raw_text: string;
 }
 
+/* ========= 判定结果 ========= */
 interface CheckedItem {
   expression: string;
   studentAnswer: string;
@@ -13,64 +15,131 @@ interface CheckedItem {
   correctAnswer: string;
 }
 
-function parseFraction(str: string): number | null {
+/* ========= 分数结构 ========= */
+interface Fraction {
+  n: number; // numerator
+  d: number; // denominator
+}
+
+/* ========= 最大公约数 ========= */
+function gcd(a: number, b: number): number {
+  return b === 0 ? Math.abs(a) : gcd(b, a % b);
+}
+
+/* ========= 约分 ========= */
+function normalize(f: Fraction): Fraction {
+  const g = gcd(f.n, f.d);
+  return { n: f.n / g, d: f.d / g };
+}
+
+/* ========= 分数字符串 → Fraction ========= */
+function parseFractionExact(str: string): Fraction | null {
   try {
     const s = str.trim();
+
+    // 带分数：3 1/2
     if (s.includes(" ")) {
       const [w, f] = s.split(" ");
       const [n, d] = f.split("/");
-      return Number(w) + Number(n) / Number(d);
+      return normalize({
+        n: Number(w) * Number(d) + Number(n),
+        d: Number(d),
+      });
     }
+
+    // 普通分数：1/3
     if (s.includes("/")) {
       const [n, d] = s.split("/");
-      return Number(n) / Number(d);
+      return normalize({ n: Number(n), d: Number(d) });
     }
-    return Number(s);
+
+    // 整数
+    return { n: Number(s), d: 1 };
   } catch {
     return null;
   }
 }
 
-function evalExpression(expr: string): number | null {
+/* ========= 表达式 → Fraction ========= */
+function evalExpressionExact(expr: string): Fraction | null {
   try {
-    const normalized = expr
+    let normalized = expr
       .replace("×", "*")
       .replace("÷", "/")
-      .replace(/(\d+)\s+(\d+)\/(\d+)/g, "($1 + $2/$3)");
+      .replace(/(\d+)\s+(\d+)\/(\d+)/g, "($1*$3+$2)/$3");
+
+    // 普通分数
+    normalized = normalized.replace(
+      /(\d+)\s*\/\s*(\d+)/g,
+      "($1)/($2)"
+    );
+
     // eslint-disable-next-line no-eval
-    return eval(normalized);
+    const value = eval(normalized);
+
+    if (Number.isInteger(value)) {
+      return { n: value, d: 1 };
+    }
+
+    // 小数 → 分数（有限小数）
+    const s = value.toString();
+    if (s.includes(".")) {
+      const len = s.split(".")[1].length;
+      const d = Math.pow(10, len);
+      return normalize({ n: Math.round(value * d), d });
+    }
+
+    return null;
   } catch {
     return null;
   }
 }
 
+/* ========= Fraction 相等 ========= */
+function fractionEqual(a: Fraction, b: Fraction): boolean {
+  const fa = normalize(a);
+  const fb = normalize(b);
+  return fa.n === fb.n && fa.d === fb.d;
+}
+
+/* ========= raw_text → 判定 ========= */
 function parseAndCheck(raw: string): CheckedItem[] {
   return raw
     .split("\n")
-    .map(line => line.trim())
-    .filter(line => line.includes("="))
+    .map(l => l.trim())
+    .filter(l => l.includes("="))
     .map(line => {
       const [left, right] = line.split("=");
       const expression = left.trim();
       const studentAnswer = right.trim();
 
-      const correctVal = evalExpression(expression);
-      const studentVal = parseFraction(studentAnswer);
+      const correctFrac = evalExpressionExact(expression);
+      const studentFrac = parseFractionExact(studentAnswer);
 
       let isCorrect = false;
       let correctAnswer = "?";
 
-      if (correctVal !== null && studentVal !== null) {
-        isCorrect = Math.abs(correctVal - studentVal) < 1e-6;
-        correctAnswer = String(correctVal);
+      if (correctFrac && studentFrac) {
+        isCorrect = fractionEqual(correctFrac, studentFrac);
+        correctAnswer =
+          correctFrac.d === 1
+            ? `${correctFrac.n}`
+            : `${correctFrac.n}/${correctFrac.d}`;
       }
 
-      return { expression, studentAnswer, isCorrect, correctAnswer };
+      return {
+        expression,
+        studentAnswer,
+        isCorrect,
+        correctAnswer,
+      };
     });
 }
 
+/* ========= 页面 ========= */
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
+
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [checked, setChecked] = useState<CheckedItem[]>([]);
@@ -86,6 +155,7 @@ const HomeworkCameraPage: React.FC = () => {
   const handleCheck = async () => {
     if (!file) return;
     setLoading(true);
+
     const formData = new FormData();
     formData.append("image", file);
 
@@ -95,14 +165,22 @@ const HomeworkCameraPage: React.FC = () => {
       { timeout: 60000 }
     );
 
-    setChecked(res.data.raw_text ? parseAndCheck(res.data.raw_text) : []);
+    setChecked(
+      res.data.raw_text
+        ? parseAndCheck(res.data.raw_text)
+        : []
+    );
+
     setLoading(false);
   };
 
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-md mx-auto space-y-4">
-        <button onClick={() => navigate(-1)} className="text-xs text-slate-500">
+        <button
+          onClick={() => navigate(-1)}
+          className="text-xs text-slate-500"
+        >
           ← 戻る
         </button>
 
@@ -111,12 +189,10 @@ const HomeworkCameraPage: React.FC = () => {
         <input type="file" accept="image/*" onChange={handleFileChange} />
 
         {preview && (
-          <div className="bg-white rounded-xl border p-2">
-            <img
-              src={preview}
-              className="w-full max-h-80 object-contain rounded"
-            />
-          </div>
+          <img
+            src={preview}
+            className="w-full max-h-80 object-contain bg-white rounded"
+          />
         )}
 
         <button
@@ -127,21 +203,28 @@ const HomeworkCameraPage: React.FC = () => {
           {loading ? "読み取り中…" : "この写真でチェック"}
         </button>
 
-        {/* === A5-2：贴近图片的原题结果 === */}
+        {/* ===== 原题判定 ===== */}
         {checked.length > 0 && (
           <div className="bg-white rounded-xl border p-4 space-y-2">
             <div className="font-semibold">🧮 原題の結果</div>
             {checked.map((item, idx) => (
               <div
                 key={idx}
-                className="flex items-center justify-between text-sm"
+                className="flex justify-between items-center"
               >
                 <div>
                   {idx + 1}. {item.expression} = {item.studentAnswer}
+                  {!item.isCorrect && (
+                    <div className="text-xs text-slate-600">
+                      正しい答え：{item.correctAnswer}
+                    </div>
+                  )}
                 </div>
                 <div
                   className={`font-bold ${
-                    item.isCorrect ? "text-emerald-600" : "text-red-600"
+                    item.isCorrect
+                      ? "text-emerald-600"
+                      : "text-red-600"
                   }`}
                 >
                   {item.isCorrect ? "○" : "×"}
