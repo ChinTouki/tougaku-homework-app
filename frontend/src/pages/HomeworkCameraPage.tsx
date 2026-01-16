@@ -79,7 +79,7 @@ function parseAndCheck(raw: string): CheckedItem[] {
     });
 }
 
-/* ========= 先生コメント（规则） ========= */
+/* ========= 先生コメント ========= */
 function teacherComment(correct: number, wrong: number): string {
   if (wrong === 0) {
     return "とてもよくできました！この調子で続けましょう。";
@@ -93,9 +93,9 @@ function teacherComment(correct: number, wrong: number): string {
 /* ========= 页面 ========= */
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
+
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [rawText, setRawText] = useState<string>("");
   const [checked, setChecked] = useState<CheckedItem[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -103,7 +103,6 @@ const HomeworkCameraPage: React.FC = () => {
     const f = e.target.files?.[0] || null;
     setFile(f);
     setPreview(f ? URL.createObjectURL(f) : null);
-    setRawText("");
     setChecked([]);
   };
 
@@ -120,8 +119,12 @@ const HomeworkCameraPage: React.FC = () => {
       { timeout: 60000 }
     );
 
-    setRawText(res.data.raw_text || "");
-    setChecked(res.data.raw_text ? parseAndCheck(res.data.raw_text) : []);
+    setChecked(
+      res.data.raw_text
+        ? parseAndCheck(res.data.raw_text)
+        : []
+    );
+
     setLoading(false);
   };
 
