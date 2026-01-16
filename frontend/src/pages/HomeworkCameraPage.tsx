@@ -2,12 +2,10 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "../api/client";
 
-/* ========= 后端返回 ========= */
 interface ApiResponse {
   raw_text: string;
 }
 
-/* ========= 判定结果 ========= */
 interface CheckedItem {
   expression: string;
   studentAnswer: string;
@@ -15,7 +13,6 @@ interface CheckedItem {
   correctAnswer: string;
 }
 
-/* ========= 分数解析 ========= */
 function parseFraction(str: string): number | null {
   try {
     const s = str.trim();
@@ -34,7 +31,6 @@ function parseFraction(str: string): number | null {
   }
 }
 
-/* ========= 表达式计算 ========= */
 function evalExpression(expr: string): number | null {
   try {
     const normalized = expr
@@ -48,7 +44,6 @@ function evalExpression(expr: string): number | null {
   }
 }
 
-/* ========= raw_text → 判定 ========= */
 function parseAndCheck(raw: string): CheckedItem[] {
   return raw
     .split("\n")
@@ -70,19 +65,12 @@ function parseAndCheck(raw: string): CheckedItem[] {
         correctAnswer = String(correctVal);
       }
 
-      return {
-        expression,
-        studentAnswer,
-        isCorrect,
-        correctAnswer,
-      };
+      return { expression, studentAnswer, isCorrect, correctAnswer };
     });
 }
 
-/* ========= 页面 ========= */
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
-
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [checked, setChecked] = useState<CheckedItem[]>([]);
@@ -98,7 +86,6 @@ const HomeworkCameraPage: React.FC = () => {
   const handleCheck = async () => {
     if (!file) return;
     setLoading(true);
-
     const formData = new FormData();
     formData.append("image", file);
 
@@ -108,22 +95,14 @@ const HomeworkCameraPage: React.FC = () => {
       { timeout: 60000 }
     );
 
-    setChecked(
-      res.data.raw_text
-        ? parseAndCheck(res.data.raw_text)
-        : []
-    );
-
+    setChecked(res.data.raw_text ? parseAndCheck(res.data.raw_text) : []);
     setLoading(false);
   };
 
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-md mx-auto space-y-4">
-        <button
-          onClick={() => navigate(-1)}
-          className="text-xs text-slate-500"
-        >
+        <button onClick={() => navigate(-1)} className="text-xs text-slate-500">
           ← 戻る
         </button>
 
@@ -132,10 +111,12 @@ const HomeworkCameraPage: React.FC = () => {
         <input type="file" accept="image/*" onChange={handleFileChange} />
 
         {preview && (
-          <img
-            src={preview}
-            className="w-full max-h-80 object-contain bg-white rounded"
-          />
+          <div className="bg-white rounded-xl border p-2">
+            <img
+              src={preview}
+              className="w-full max-h-80 object-contain rounded"
+            />
+          </div>
         )}
 
         <button
@@ -146,29 +127,23 @@ const HomeworkCameraPage: React.FC = () => {
           {loading ? "読み取り中…" : "この写真でチェック"}
         </button>
 
-        {/* ===== 原題判定 ===== */}
+        {/* === A5-2：贴近图片的原题结果 === */}
         {checked.length > 0 && (
-          <div className="space-y-3">
-            <div className="font-semibold">🧮 原題のチェック結果</div>
-
+          <div className="bg-white rounded-xl border p-4 space-y-2">
+            <div className="font-semibold">🧮 原題の結果</div>
             {checked.map((item, idx) => (
               <div
                 key={idx}
-                className={`flex justify-between items-center border rounded-xl px-4 py-2 ${
-                  item.isCorrect ? "bg-emerald-50" : "bg-red-50"
-                }`}
+                className="flex items-center justify-between text-sm"
               >
                 <div>
-                  <div className="font-semibold">
-                    {item.expression} = {item.studentAnswer}
-                  </div>
-                  {!item.isCorrect && (
-                    <div className="text-xs text-slate-600">
-                      正しい答え：{item.correctAnswer}
-                    </div>
-                  )}
+                  {idx + 1}. {item.expression} = {item.studentAnswer}
                 </div>
-                <div className="text-2xl font-bold">
+                <div
+                  className={`font-bold ${
+                    item.isCorrect ? "text-emerald-600" : "text-red-600"
+                  }`}
+                >
                   {item.isCorrect ? "○" : "×"}
                 </div>
               </div>
