@@ -15,20 +15,20 @@ interface CheckedItem {
   correctAnswer: string;
 }
 
-/* ========= 分数解析（暂不深究） ========= */
+/* ========= 分数解析 ========= */
 function parseFraction(str: string): number | null {
   try {
-    str = str.trim();
-    if (str.includes(" ")) {
-      const [w, f] = str.split(" ");
+    const s = str.trim();
+    if (s.includes(" ")) {
+      const [w, f] = s.split(" ");
       const [n, d] = f.split("/");
-      return parseInt(w) + parseInt(n) / parseInt(d);
+      return Number(w) + Number(n) / Number(d);
     }
-    if (str.includes("/")) {
-      const [n, d] = str.split("/");
-      return parseInt(n) / parseInt(d);
+    if (s.includes("/")) {
+      const [n, d] = s.split("/");
+      return Number(n) / Number(d);
     }
-    return parseInt(str);
+    return Number(s);
   } catch {
     return null;
   }
@@ -52,27 +52,27 @@ function evalExpression(expr: string): number | null {
 function parseAndCheck(raw: string): CheckedItem[] {
   return raw
     .split("\n")
-    .map(l => l.trim())
-    .filter(l => l.includes("="))
+    .map(line => line.trim())
+    .filter(line => line.includes("="))
     .map(line => {
       const [left, right] = line.split("=");
-      const expr = left.trim();
-      const student = right.trim();
+      const expression = left.trim();
+      const studentAnswer = right.trim();
 
-      const correctVal = evalExpression(expr);
-      const studentVal = parseFraction(student);
+      const correctVal = evalExpression(expression);
+      const studentVal = parseFraction(studentAnswer);
 
       let isCorrect = false;
       let correctAnswer = "?";
 
       if (correctVal !== null && studentVal !== null) {
         isCorrect = Math.abs(correctVal - studentVal) < 1e-6;
-        correctAnswer = correctVal.toString();
+        correctAnswer = String(correctVal);
       }
 
       return {
-        expression: expr,
-        studentAnswer: student,
+        expression,
+        studentAnswer,
         isCorrect,
         correctAnswer,
       };
@@ -80,11 +80,11 @@ function parseAndCheck(raw: string): CheckedItem[] {
 }
 
 /* ========= 先生コメント ========= */
-function teacherComment(correct: number, wrong: number): string {
-  if (wrong === 0) {
+function teacherComment(correctCount: number, wrongCount: number): string {
+  if (wrongCount === 0) {
     return "とてもよくできました！この調子で続けましょう。";
   }
-  if (wrong === 1) {
+  if (wrongCount === 1) {
     return "少しまちがいがありましたが、全体的によくできています。";
   }
   return "計算のしかたをもう一度見直してみましょう。";
@@ -100,7 +100,7 @@ const HomeworkCameraPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0] || null;
+    const f = e.target.files?.[0] ?? null;
     setFile(f);
     setPreview(f ? URL.createObjectURL(f) : null);
     setChecked([]);
@@ -128,7 +128,7 @@ const HomeworkCameraPage: React.FC = () => {
     setLoading(false);
   };
 
-  const correctCount = checked.filter(c => c.isCorrect).length;
+  const correctCount = checked.filter(item => item.isCorrect).length;
   const wrongCount = checked.length - correctCount;
   const rate =
     checked.length > 0
@@ -138,7 +138,10 @@ const HomeworkCameraPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-md mx-auto space-y-4">
-        <button onClick={() => navigate(-1)} className="text-xs text-slate-500">
+        <button
+          onClick={() => navigate(-1)}
+          className="text-xs text-slate-500"
+        >
           ← 戻る
         </button>
 
