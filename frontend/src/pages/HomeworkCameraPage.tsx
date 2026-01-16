@@ -79,17 +79,6 @@ function parseAndCheck(raw: string): CheckedItem[] {
     });
 }
 
-/* ========= 先生コメント ========= */
-function teacherComment(correctCount: number, wrongCount: number): string {
-  if (wrongCount === 0) {
-    return "とてもよくできました！この調子で続けましょう。";
-  }
-  if (wrongCount === 1) {
-    return "少しまちがいがありましたが、全体的によくできています。";
-  }
-  return "計算のしかたをもう一度見直してみましょう。";
-}
-
 /* ========= 页面 ========= */
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
@@ -128,13 +117,6 @@ const HomeworkCameraPage: React.FC = () => {
     setLoading(false);
   };
 
-  const correctCount = checked.filter(item => item.isCorrect).length;
-  const wrongCount = checked.length - correctCount;
-  const rate =
-    checked.length > 0
-      ? Math.round((correctCount / checked.length) * 100)
-      : 0;
-
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-md mx-auto space-y-4">
@@ -164,42 +146,35 @@ const HomeworkCameraPage: React.FC = () => {
           {loading ? "読み取り中…" : "この写真でチェック"}
         </button>
 
-        {/* ===== 今日のまとめ ===== */}
+        {/* ===== 原題判定 ===== */}
         {checked.length > 0 && (
-          <div className="bg-white border rounded-xl p-4 space-y-2">
-            <div className="font-semibold">📊 今日の算数まとめ</div>
-            <div>✔ 正解：{correctCount}問</div>
-            <div>✕ 間違い：{wrongCount}問</div>
-            <div>正答率：{rate}%</div>
-            <div className="text-sm text-slate-700 mt-2">
-              👩‍🏫 {teacherComment(correctCount, wrongCount)}
-            </div>
+          <div className="space-y-3">
+            <div className="font-semibold">🧮 原題のチェック結果</div>
+
+            {checked.map((item, idx) => (
+              <div
+                key={idx}
+                className={`flex justify-between items-center border rounded-xl px-4 py-2 ${
+                  item.isCorrect ? "bg-emerald-50" : "bg-red-50"
+                }`}
+              >
+                <div>
+                  <div className="font-semibold">
+                    {item.expression} = {item.studentAnswer}
+                  </div>
+                  {!item.isCorrect && (
+                    <div className="text-xs text-slate-600">
+                      正しい答え：{item.correctAnswer}
+                    </div>
+                  )}
+                </div>
+                <div className="text-2xl font-bold">
+                  {item.isCorrect ? "○" : "×"}
+                </div>
+              </div>
+            ))}
           </div>
         )}
-
-        {/* ===== 原题判定 ===== */}
-        {checked.map((item, idx) => (
-          <div
-            key={idx}
-            className={`flex justify-between items-center border rounded-xl px-4 py-2 ${
-              item.isCorrect ? "bg-emerald-50" : "bg-red-50"
-            }`}
-          >
-            <div>
-              <div className="font-semibold">
-                {item.expression} = {item.studentAnswer}
-              </div>
-              {!item.isCorrect && (
-                <div className="text-xs text-slate-600">
-                  正しい答え：{item.correctAnswer}
-                </div>
-              )}
-            </div>
-            <div className="text-2xl font-bold">
-              {item.isCorrect ? "○" : "×"}
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );
