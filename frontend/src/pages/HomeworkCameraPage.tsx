@@ -2,29 +2,113 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "../api/client";
 
+/* ========= API 返回 ========= */
 interface ApiResponse {
   raw_text?: string;
   error?: string;
 }
 
+/* ========= 判定结构 ========= */
+interface CheckedItem {
+  expression: string;
+  studentAnswer: string;
+  isCorrect: boolean;
+  correctAnswer: string;
+}
+
+/* ========= 简单分数/整数解析 ========= */
+function parseValue(str: string): number | null {
+  try {
+    const s = str.trim();
+
+    // 带分数 3 1/2
+    if (s.includes(" ")) {
+      const [w, f] = s.split(" ");
+      const [n, d] = f.split("/");
+      return Number(w) + Number(n) / Number(d);
+    }
+
+    // 分数 1/3
+    if (s.includes("/")) {
+      const [n, d] = s.split("/");
+      return Number(n) / Number(d);
+    }
+
+    // 整数
+    return Number(s);
+  } catch {
+    return null;
+  }
+}
+
+/* ========= 计算表达式 ========= */
+function evalExpression(expr: string): number | null {
+  try {
+    const normalized = expr
+      .replace("×", "*")
+      .replace("÷", "/")
+      .replace(/(\d+)\s+(\d+)\/(\d+)/g, "($1 + $2/$3)");
+
+    // eslint-disable-next-line no-eval
+    return eval(normalized);
+  } catch {
+    return null;
+  }
+}
+
+/* ========= raw_text → 判题 ========= */
+function parseAndCheck(raw: string): CheckedItem[] {
+  return raw
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line.includes("="))
+    .map(line => {
+      const [left, right] = line.split("=");
+      const expression = left.trim();
+      const studentAnswer = right.trim();
+
+      const correctVal = evalExpression(expression);
+      const studentVal = parseValue(studentAnswer);
+
+      let isCorrect = false;
+      let correctAnswer = "?";
+
+      if (correctVal !== null && studentVal !== null) {
+        isCorrect = Math.abs(correctVal - studentVal) < 1e-6;
+        correctAnswer = String(correctVal);
+      }
+
+      return {
+        expression,
+        studentAnswer,
+        isCorrect,
+        correctAnswer,
+      };
+    });
+}
+
+/* ========= 页面 ========= */
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [response, setResponse] = useState<ApiResponse | null>(null);
+  const [checked, setChecked] = useState<CheckedItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] ?? null;
     setFile(f);
     setPreview(f ? URL.createObjectURL(f) : null);
-    setResponse(null);
+    setChecked([]);
+    setError(null);
   };
 
   const handleCheck = async () => {
     if (!file) return;
     setLoading(true);
+    setError(null);
 
     const formData = new FormData();
     formData.append("image", file);
@@ -35,9 +119,15 @@ const HomeworkCameraPage: React.FC = () => {
         formData,
         { timeout: 60000 }
       );
-      setResponse(res.data);
-    } catch (e) {
-      setResponse({ error: "request_failed" });
+
+      if (res.data.raw_text) {
+        setChecked(parseAndCheck(res.data.raw_text));
+      } else {
+        setChecked([]);
+        setError("文字を読み取れませんでした。");
+      }
+    } catch {
+      setError("サーバー通信に失敗しました。");
     } finally {
       setLoading(false);
     }
@@ -46,11 +136,14 @@ const HomeworkCameraPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-md mx-auto space-y-4">
-        <button onClick={() => navigate(-1)} className="text-xs text-slate-500">
+        <button
+          onClick={() => navigate(-1)}
+          className="text-xs text-slate-500"
+        >
           ← 戻る
         </button>
 
-        <h1 className="text-lg font-bold">📸 宿題チェック（診断）</h1>
+        <h1 className="text-lg font-bold">📸 宿題チェック（算数）</h1>
 
         <input type="file" accept="image/*" onChange={handleFileChange} />
 
@@ -66,30 +159,40 @@ const HomeworkCameraPage: React.FC = () => {
           disabled={loading}
           className="w-full rounded-full bg-amber-400 py-2 font-semibold"
         >
-          {loading ? "読み取り中…" : "この写真でチェック"}
+          {loading ? "判定中…" : "この写真でチェック"}
         </button>
 
-        {response && (
-          <div className="bg-white border rounded p-3 text-sm whitespace-pre-wrap">
-            <div className="font-semibold mb-1">📦 API Response</div>
+        {error && (
+          <div className="text-red-600 text-sm">{error}</div>
+        )}
 
-            <div className="text-xs text-slate-500 mb-1">
-              raw_text:
-            </div>
-            <pre className="bg-slate-100 p-2 rounded">
-{response.raw_text ?? "(undefined)"}
-            </pre>
+        {/* ===== 判定结果 ===== */}
+        {checked.length > 0 && (
+          <div className="space-y-3">
+            <div className="font-semibold">🧮 判定結果</div>
 
-            {response.error && (
-              <>
-                <div className="text-xs text-red-600 mt-2">
-                  error:
+            {checked.map((item, idx) => (
+              <div
+                key={idx}
+                className={`flex justify-between items-center border rounded-xl px-4 py-2 ${
+                  item.isCorrect ? "bg-emerald-50" : "bg-red-50"
+                }`}
+              >
+                <div>
+                  <div className="font-semibold">
+                    {item.expression} = {item.studentAnswer}
+                  </div>
+                  {!item.isCorrect && (
+                    <div className="text-xs text-slate-600">
+                      正しい答え：{item.correctAnswer}
+                    </div>
+                  )}
                 </div>
-                <pre className="bg-red-50 p-2 rounded">
-{response.error}
-                </pre>
-              </>
-            )}
+                <div className="text-2xl font-bold">
+                  {item.isCorrect ? "○" : "×"}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
