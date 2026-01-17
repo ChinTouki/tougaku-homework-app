@@ -4,28 +4,31 @@ import { apiClient } from "../api/client";
 
 interface ApiResponse {
   raw_text?: string;
+  error?: string;
 }
 
 interface CheckedItem {
-  expression: string;
-  studentAnswer: string;
-  isCorrect: boolean;
-  correctAnswer: string;
+  rawLine: string;
+  expression?: string;
+  studentAnswer?: string;
+  isCorrect?: boolean;
+  correctAnswer?: string;
 }
 
-/* ===== 简单解析 ===== */
+/* ===== 简单数值解析 ===== */
 function parseValue(str: string): number | null {
   try {
-    if (str.includes(" ")) {
-      const [w, f] = str.split(" ");
+    const s = str.trim();
+    if (s.includes(" ")) {
+      const [w, f] = s.split(" ");
       const [n, d] = f.split("/");
       return Number(w) + Number(n) / Number(d);
     }
-    if (str.includes("/")) {
-      const [n, d] = str.split("/");
+    if (s.includes("/")) {
+      const [n, d] = s.split("/");
       return Number(n) / Number(d);
     }
-    return Number(str);
+    return Number(s);
   } catch {
     return null;
   }
@@ -41,18 +44,24 @@ function evalExpression(expr: string): number | null {
   }
 }
 
+/* ===== 解析 + 判题（允许失败） ===== */
 function parseAndCheck(raw: string): CheckedItem[] {
   return raw
     .split("\n")
-    .map(l => l.trim())
-    .filter(l => l.includes("=") || l.includes("＝"))
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
     .map(line => {
-      // 统一等号
       const normalized = line.replace("＝", "=");
+
+      if (!normalized.includes("=")) {
+        // 无法解析的行，也保留
+        return { rawLine: line };
+      }
+
       const [left, right] = normalized.split("=");
 
       if (!left || !right) {
-        return null;
+        return { rawLine: line };
       }
 
       const expression = left.trim();
@@ -61,34 +70,37 @@ function parseAndCheck(raw: string): CheckedItem[] {
       const correctVal = evalExpression(expression);
       const studentVal = parseValue(studentAnswer);
 
-      const isCorrect =
-        correctVal !== null &&
-        studentVal !== null &&
-        Math.abs(correctVal - studentVal) < 1e-6;
+      if (correctVal === null || studentVal === null) {
+        return { rawLine: line, expression, studentAnswer };
+      }
+
+      const isCorrect = Math.abs(correctVal - studentVal) < 1e-6;
 
       return {
+        rawLine: line,
         expression,
         studentAnswer,
         isCorrect,
-        correctAnswer: String(correctVal ?? "?"),
+        correctAnswer: String(correctVal),
       };
-    })
-    .filter(Boolean) as CheckedItem[];
+    });
 }
-
 
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
+
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [checked, setChecked] = useState<CheckedItem[]>([]);
+  const [items, setItems] = useState<CheckedItem[]>([]);
+  const [rawText, setRawText] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] ?? null;
     setFile(f);
     setPreview(f ? URL.createObjectURL(f) : null);
-    setChecked([]);
+    setItems([]);
+    setRawText("");
   };
 
   const handleCheck = async () => {
@@ -104,7 +116,10 @@ const HomeworkCameraPage: React.FC = () => {
       { timeout: 60000 }
     );
 
-    setChecked(res.data.raw_text ? parseAndCheck(res.data.raw_text) : []);
+    const text = res.data.raw_text ?? "";
+    setRawText(text);
+    setItems(text ? parseAndCheck(text) : []);
+
     setLoading(false);
   };
 
@@ -119,38 +134,11 @@ const HomeworkCameraPage: React.FC = () => {
 
         <input type="file" accept="image/*" onChange={handleFileChange} />
 
-        {/* ===== 图片 + 伪画圈 ===== */}
         {preview && (
-          <div className="relative bg-white rounded-xl border p-2">
-            <img
-              src={preview}
-              className="w-full object-contain rounded"
-            />
-
-            {/* 覆盖层 */}
-            {checked.map((c, i) => (
-              <div
-                key={i}
-                className="absolute left-2"
-                style={{
-                  top: `${((i + 1) / (checked.length + 1)) * 100}%`,
-                }}
-              >
-                <span className="text-sm font-bold mr-1">
-                  {i + 1}.
-                </span>
-                <span
-                  className={`text-2xl font-bold ${
-                    c.isCorrect
-                      ? "text-emerald-600"
-                      : "text-red-600"
-                  }`}
-                >
-                  {c.isCorrect ? "○" : "×"}
-                </span>
-              </div>
-            ))}
-          </div>
+          <img
+            src={preview}
+            className="w-full max-h-80 object-contain bg-white rounded"
+          />
         )}
 
         <button
@@ -161,22 +149,41 @@ const HomeworkCameraPage: React.FC = () => {
           {loading ? "読み取り中…" : "この写真でチェック"}
         </button>
 
-        {/* ===== 文字列表（辅助） ===== */}
-        {checked.length > 0 && (
+        {/* ===== 一定显示 raw_text ===== */}
+        {rawText && (
+          <div className="bg-white border rounded p-3 text-sm whitespace-pre-wrap">
+            <div className="font-semibold mb-1">📄 読み取った文字</div>
+            {rawText}
+          </div>
+        )}
+
+        {/* ===== 判定 / 兜底显示 ===== */}
+        {items.length > 0 && (
           <div className="space-y-2">
             <div className="font-semibold">🧮 判定結果</div>
-            {checked.map((c, i) => (
+
+            {items.map((item, idx) => (
               <div
-                key={i}
+                key={idx}
                 className={`border rounded-xl px-4 py-2 flex justify-between ${
-                  c.isCorrect ? "bg-emerald-50" : "bg-red-50"
+                  item.isCorrect === true
+                    ? "bg-emerald-50"
+                    : item.isCorrect === false
+                    ? "bg-red-50"
+                    : "bg-slate-100"
                 }`}
               >
                 <span>
-                  {i + 1}. {c.expression} = {c.studentAnswer}
+                  {item.expression
+                    ? `${item.expression} = ${item.studentAnswer}`
+                    : item.rawLine}
                 </span>
                 <span className="font-bold">
-                  {c.isCorrect ? "○" : "×"}
+                  {item.isCorrect === true
+                    ? "○"
+                    : item.isCorrect === false
+                    ? "×"
+                    : "？"}
                 </span>
               </div>
             ))}
