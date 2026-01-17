@@ -45,11 +45,21 @@ function parseAndCheck(raw: string): CheckedItem[] {
   return raw
     .split("\n")
     .map(l => l.trim())
-    .filter(l => l.includes("="))
+    .filter(l => l.includes("=") || l.includes("＝"))
     .map(line => {
-      const [left, right] = line.split("=");
-      const correctVal = evalExpression(left.trim());
-      const studentVal = parseValue(right.trim());
+      // 统一等号
+      const normalized = line.replace("＝", "=");
+      const [left, right] = normalized.split("=");
+
+      if (!left || !right) {
+        return null;
+      }
+
+      const expression = left.trim();
+      const studentAnswer = right.trim();
+
+      const correctVal = evalExpression(expression);
+      const studentVal = parseValue(studentAnswer);
 
       const isCorrect =
         correctVal !== null &&
@@ -57,13 +67,15 @@ function parseAndCheck(raw: string): CheckedItem[] {
         Math.abs(correctVal - studentVal) < 1e-6;
 
       return {
-        expression: left.trim(),
-        studentAnswer: right.trim(),
+        expression,
+        studentAnswer,
         isCorrect,
         correctAnswer: String(correctVal ?? "?"),
       };
-    });
+    })
+    .filter(Boolean) as CheckedItem[];
 }
+
 
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
