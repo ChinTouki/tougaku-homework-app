@@ -2,12 +2,10 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "../api/client";
 
-/* ========= API ========= */
 interface ApiResponse {
   raw_text?: string;
 }
 
-/* ========= 判定结构 ========= */
 interface CheckedItem {
   expression: string;
   studentAnswer: string;
@@ -15,7 +13,7 @@ interface CheckedItem {
   correctAnswer: string;
 }
 
-/* ========= 工具 ========= */
+/* ===== 简单解析 ===== */
 function parseValue(str: string): number | null {
   try {
     if (str.includes(" ")) {
@@ -52,6 +50,7 @@ function parseAndCheck(raw: string): CheckedItem[] {
       const [left, right] = line.split("=");
       const correctVal = evalExpression(left.trim());
       const studentVal = parseValue(right.trim());
+
       const isCorrect =
         correctVal !== null &&
         studentVal !== null &&
@@ -66,30 +65,6 @@ function parseAndCheck(raw: string): CheckedItem[] {
     });
 }
 
-/* ========= A8：老师点评规则 ========= */
-function teacherSummary(checked: CheckedItem[]) {
-  const total = checked.length;
-  const correct = checked.filter(c => c.isCorrect).length;
-  const wrong = total - correct;
-  const rate = total > 0 ? Math.round((correct / total) * 100) : 0;
-
-  let good = "計算を最後までしっかり考えられています。";
-  let improve = "この調子で続けましょう。";
-
-  if (wrong > 0) {
-    if (checked.some(c => !c.isCorrect && c.expression.includes("×"))) {
-      improve = "かけ算の九九をもう一度れんしゅうしましょう。";
-    } else if (checked.some(c => !c.isCorrect && c.expression.includes("÷"))) {
-      improve = "わり算の考え方をゆっくり確認しましょう。";
-    } else if (checked.some(c => !c.isCorrect && c.expression.includes("/"))) {
-      improve = "分数の計算は、通分を意識するとよくなります。";
-    }
-  }
-
-  return { total, correct, wrong, rate, good, improve };
-}
-
-/* ========= 页面 ========= */
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
@@ -121,8 +96,6 @@ const HomeworkCameraPage: React.FC = () => {
     setLoading(false);
   };
 
-  const summary = teacherSummary(checked);
-
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-md mx-auto space-y-4">
@@ -134,11 +107,38 @@ const HomeworkCameraPage: React.FC = () => {
 
         <input type="file" accept="image/*" onChange={handleFileChange} />
 
+        {/* ===== 图片 + 伪画圈 ===== */}
         {preview && (
-          <img
-            src={preview}
-            className="w-full max-h-80 object-contain bg-white rounded"
-          />
+          <div className="relative bg-white rounded-xl border p-2">
+            <img
+              src={preview}
+              className="w-full object-contain rounded"
+            />
+
+            {/* 覆盖层 */}
+            {checked.map((c, i) => (
+              <div
+                key={i}
+                className="absolute left-2"
+                style={{
+                  top: `${((i + 1) / (checked.length + 1)) * 100}%`,
+                }}
+              >
+                <span className="text-sm font-bold mr-1">
+                  {i + 1}.
+                </span>
+                <span
+                  className={`text-2xl font-bold ${
+                    c.isCorrect
+                      ? "text-emerald-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {c.isCorrect ? "○" : "×"}
+                </span>
+              </div>
+            ))}
+          </div>
         )}
 
         <button
@@ -149,40 +149,27 @@ const HomeworkCameraPage: React.FC = () => {
           {loading ? "読み取り中…" : "この写真でチェック"}
         </button>
 
-        {/* ===== A8：今日のまとめ ===== */}
+        {/* ===== 文字列表（辅助） ===== */}
         {checked.length > 0 && (
-          <div className="bg-white border rounded-xl p-4 space-y-2">
-            <div className="font-semibold">📘 今日の学習まとめ（算数）</div>
-            <div>✔ 正解：{summary.correct}問</div>
-            <div>✕ まちがい：{summary.wrong}問</div>
-            <div>正答率：{summary.rate}%</div>
-            <div className="text-sm mt-2">
-              <div>できているところ：</div>
-              <div className="text-slate-700">{summary.good}</div>
-            </div>
-            <div className="text-sm mt-2">
-              <div>これからのポイント：</div>
-              <div className="text-slate-700">{summary.improve}</div>
-            </div>
+          <div className="space-y-2">
+            <div className="font-semibold">🧮 判定結果</div>
+            {checked.map((c, i) => (
+              <div
+                key={i}
+                className={`border rounded-xl px-4 py-2 flex justify-between ${
+                  c.isCorrect ? "bg-emerald-50" : "bg-red-50"
+                }`}
+              >
+                <span>
+                  {i + 1}. {c.expression} = {c.studentAnswer}
+                </span>
+                <span className="font-bold">
+                  {c.isCorrect ? "○" : "×"}
+                </span>
+              </div>
+            ))}
           </div>
         )}
-
-        {/* ===== 原题判定 ===== */}
-        {checked.map((c, i) => (
-          <div
-            key={i}
-            className={`border rounded-xl px-4 py-2 flex justify-between ${
-              c.isCorrect ? "bg-emerald-50" : "bg-red-50"
-            }`}
-          >
-            <span>
-              {c.expression} = {c.studentAnswer}
-            </span>
-            <span className="font-bold">
-              {c.isCorrect ? "○" : "×"}
-            </span>
-          </div>
-        ))}
       </div>
     </div>
   );
