@@ -15,12 +15,6 @@ interface CheckedItem {
   correctAnswer: string;
 }
 
-interface PracticeItem {
-  question: string;
-  userAnswer: string;
-  isCorrect: boolean | null;
-}
-
 /* ========= 工具 ========= */
 function parseValue(str: string): number | null {
   try {
@@ -49,7 +43,6 @@ function evalExpression(expr: string): number | null {
   }
 }
 
-/* ========= 判对错 ========= */
 function parseAndCheck(raw: string): CheckedItem[] {
   return raw
     .split("\n")
@@ -59,7 +52,6 @@ function parseAndCheck(raw: string): CheckedItem[] {
       const [left, right] = line.split("=");
       const correctVal = evalExpression(left.trim());
       const studentVal = parseValue(right.trim());
-
       const isCorrect =
         correctVal !== null &&
         studentVal !== null &&
@@ -74,13 +66,27 @@ function parseAndCheck(raw: string): CheckedItem[] {
     });
 }
 
-/* ========= 错题生成 ========= */
-function generatePractice(expr: string): string[] {
-  if (expr.includes("×")) return ["6 × 4 = ?", "7 × 3 = ?", "8 × 5 = ?"];
-  if (expr.includes("÷")) return ["8 ÷ 2 = ?", "12 ÷ 3 = ?", "15 ÷ 5 = ?"];
-  if (expr.includes("+")) return ["7 + 6 = ?", "9 + 8 = ?", "5 + 7 = ?"];
-  if (expr.includes("-")) return ["15 - 7 = ?", "14 - 6 = ?", "20 - 9 = ?"];
-  return [];
+/* ========= A8：老师点评规则 ========= */
+function teacherSummary(checked: CheckedItem[]) {
+  const total = checked.length;
+  const correct = checked.filter(c => c.isCorrect).length;
+  const wrong = total - correct;
+  const rate = total > 0 ? Math.round((correct / total) * 100) : 0;
+
+  let good = "計算を最後までしっかり考えられています。";
+  let improve = "この調子で続けましょう。";
+
+  if (wrong > 0) {
+    if (checked.some(c => !c.isCorrect && c.expression.includes("×"))) {
+      improve = "かけ算の九九をもう一度れんしゅうしましょう。";
+    } else if (checked.some(c => !c.isCorrect && c.expression.includes("÷"))) {
+      improve = "わり算の考え方をゆっくり確認しましょう。";
+    } else if (checked.some(c => !c.isCorrect && c.expression.includes("/"))) {
+      improve = "分数の計算は、通分を意識するとよくなります。";
+    }
+  }
+
+  return { total, correct, wrong, rate, good, improve };
 }
 
 /* ========= 页面 ========= */
@@ -89,7 +95,6 @@ const HomeworkCameraPage: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [checked, setChecked] = useState<CheckedItem[]>([]);
-  const [practice, setPractice] = useState<PracticeItem[]>([]);
   const [loading, setLoading] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -97,7 +102,6 @@ const HomeworkCameraPage: React.FC = () => {
     setFile(f);
     setPreview(f ? URL.createObjectURL(f) : null);
     setChecked([]);
-    setPractice([]);
   };
 
   const handleCheck = async () => {
@@ -113,37 +117,11 @@ const HomeworkCameraPage: React.FC = () => {
       { timeout: 60000 }
     );
 
-    const result = res.data.raw_text
-      ? parseAndCheck(res.data.raw_text)
-      : [];
-
-    setChecked(result);
-
-    // 生成错题练习
-    const exercises: PracticeItem[] = [];
-    result.filter(r => !r.isCorrect).forEach(r => {
-      generatePractice(r.expression).forEach(q => {
-        exercises.push({
-          question: q,
-          userAnswer: "",
-          isCorrect: null,
-        });
-      });
-    });
-
-    setPractice(exercises);
+    setChecked(res.data.raw_text ? parseAndCheck(res.data.raw_text) : []);
     setLoading(false);
   };
 
-  const answerPractice = (idx: number, value: string) => {
-    const q = practice[idx];
-    const correctVal = evalExpression(q.question.replace("= ?", ""));
-    const isCorrect = correctVal !== null && Number(value) === correctVal;
-
-    const updated = [...practice];
-    updated[idx] = { ...q, userAnswer: value, isCorrect };
-    setPractice(updated);
-  };
+  const summary = teacherSummary(checked);
 
   return (
     <div className="min-h-screen bg-slate-50 p-4">
@@ -171,7 +149,25 @@ const HomeworkCameraPage: React.FC = () => {
           {loading ? "読み取り中…" : "この写真でチェック"}
         </button>
 
-        {/* 判定 */}
+        {/* ===== A8：今日のまとめ ===== */}
+        {checked.length > 0 && (
+          <div className="bg-white border rounded-xl p-4 space-y-2">
+            <div className="font-semibold">📘 今日の学習まとめ（算数）</div>
+            <div>✔ 正解：{summary.correct}問</div>
+            <div>✕ まちがい：{summary.wrong}問</div>
+            <div>正答率：{summary.rate}%</div>
+            <div className="text-sm mt-2">
+              <div>できているところ：</div>
+              <div className="text-slate-700">{summary.good}</div>
+            </div>
+            <div className="text-sm mt-2">
+              <div>これからのポイント：</div>
+              <div className="text-slate-700">{summary.improve}</div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== 原题判定 ===== */}
         {checked.map((c, i) => (
           <div
             key={i}
@@ -187,36 +183,6 @@ const HomeworkCameraPage: React.FC = () => {
             </span>
           </div>
         ))}
-
-        {/* 错题练习 */}
-        {practice.length > 0 && (
-          <div className="space-y-3 mt-4">
-            <div className="font-semibold">✏️ まちがえた問題のれんしゅう</div>
-            {practice.map((p, i) => (
-              <div
-                key={i}
-                className={`border rounded p-3 ${
-                  p.isCorrect === true
-                    ? "bg-emerald-50"
-                    : p.isCorrect === false
-                    ? "bg-red-50"
-                    : "bg-white"
-                }`}
-              >
-                <div>{p.question}</div>
-                <input
-                  type="number"
-                  className="mt-1 w-full border rounded px-2 py-1"
-                  value={p.userAnswer}
-                  onChange={e => answerPractice(i, e.target.value)}
-                  placeholder="答えを入力"
-                />
-                {p.isCorrect === true && <div>✔ 正解</div>}
-                {p.isCorrect === false && <div>✕ まちがい</div>}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
