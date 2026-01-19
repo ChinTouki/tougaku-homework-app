@@ -5,6 +5,7 @@ import HomeworkPage from "./pages/HomeworkPage";
 import PracticePage from "./pages/PracticePage";
 import HomeworkCameraPage from "./pages/HomeworkCameraPage";
 import JapaneseHomeworkPage from "./pages/JapaneseHomeworkPage";
+import EnglishHomeworkPage from "./pages/EnglishHomeworkPage";
 
 
 const App: React.FC = () => {
@@ -15,6 +16,8 @@ const App: React.FC = () => {
         <Route path="/practice" element={<PracticePage />} />
         <Route path="/camera" element={<HomeworkCameraPage />} />
         <Route path="/japanese" element={<JapaneseHomeworkPage />} />
+        <Route path="/english" element={<EnglishHomeworkPage />} />
+
 
       </Routes>
     </BrowserRouter>
