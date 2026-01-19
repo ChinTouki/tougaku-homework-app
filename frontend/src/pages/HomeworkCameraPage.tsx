@@ -2,20 +2,42 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "../api/client";
 
+/* ========= API ========= */
 interface ApiResponse {
   raw_text?: string;
+  mock?: boolean;
   error?: string;
 }
 
+/* ========= 原题判定 ========= */
 interface CheckedItem {
-  rawLine: string;
-  expression?: string;
-  studentAnswer?: string;
-  isCorrect?: boolean;
-  correctAnswer?: string;
+  expression: string;
+  studentAnswer: string;
+  isCorrect: boolean;
+  correctAnswer: string;
 }
 
-/* ===== 简单数值解析 ===== */
+/* ========= 练习题 ========= */
+interface PracticeItem {
+  question: string;
+  hint: string;
+  userAnswer: string;
+  isCorrect: boolean | null;
+}
+
+/* ========= OCR 规范化 ========= */
+function normalizeOCR(text: string): string {
+  return text
+    .replace(/⅓/g, "1/3").replace(/⅔/g, "2/3")
+    .replace(/¼/g, "1/4").replace(/½/g, "1/2").replace(/¾/g, "3/4")
+    .replace(/⅛/g, "1/8").replace(/⅜/g, "3/8").replace(/⅝/g, "5/8").replace(/⅞/g, "7/8")
+    .replace(/＝/g, "=")
+    .replace(/x/g, "*").replace(/×/g, "*").replace(/÷/g, "/")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/* ========= 值解析 ========= */
 function parseValue(str: string): number | null {
   try {
     const s = str.trim();
@@ -34,102 +56,80 @@ function parseValue(str: string): number | null {
   }
 }
 
+/* ========= 表达式计算 ========= */
 function evalExpression(expr: string): number | null {
   try {
-    const n = expr.replace("×", "*").replace("÷", "/");
     // eslint-disable-next-line no-eval
-    return eval(n);
+    return eval(expr);
   } catch {
     return null;
   }
 }
-function normalizeOCR(text: string): string {
-  return text
-    // Unicode 分数 → 普通分数
-    .replace(/⅓/g, "1/3")
-    .replace(/⅔/g, "2/3")
-    .replace(/¼/g, "1/4")
-    .replace(/½/g, "1/2")
-    .replace(/¾/g, "3/4")
-    .replace(/⅛/g, "1/8")
-    .replace(/⅜/g, "3/8")
-    .replace(/⅝/g, "5/8")
-    .replace(/⅞/g, "7/8")
 
-    // 乘除号统一
-    .replace(/×/g, "*")
-    .replace(/x/g, "*")
-    .replace(/÷/g, "/")
-
-    // 全角等号
-    .replace(/＝/g, "=")
-
-    // 多余空格
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-
-/* ===== 解析 + 判题（允许失败） ===== */
+/* ========= 原题判定 ========= */
 function parseAndCheck(raw: string): CheckedItem[] {
-  const normalizedRaw = normalizeOCR(raw);
-
-  return normalizedRaw
+  const normalized = normalizeOCR(raw);
+  return normalized
     .split("\n")
-
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
+    .map(l => l.trim())
+    .filter(l => l.includes("="))
     .map(line => {
-      const normalized = line.replace("＝", "=");
-
-      if (!normalized.includes("=")) {
-        // 无法解析的行，也保留
-        return { rawLine: line };
-      }
-
-      const [left, right] = normalized.split("=");
-
-      if (!left || !right) {
-        return { rawLine: line };
-      }
-
-      const expression = left.trim();
-      const studentAnswer = right.trim();
-
-      const correctVal = evalExpression(expression);
-      const studentVal = parseValue(studentAnswer);
-
-      if (correctVal === null || studentVal === null) {
-        return { rawLine: line, expression, studentAnswer };
-      }
-
-      const isCorrect = Math.abs(correctVal - studentVal) < 1e-6;
+      const [left, right] = line.split("=");
+      const correctVal = evalExpression(left.trim());
+      const studentVal = parseValue(right.trim());
+      const isCorrect =
+        correctVal !== null &&
+        studentVal !== null &&
+        Math.abs(correctVal - studentVal) < 1e-6;
 
       return {
-        rawLine: line,
-        expression,
-        studentAnswer,
+        expression: left.trim(),
+        studentAnswer: right.trim(),
         isCorrect,
-        correctAnswer: String(correctVal),
+        correctAnswer: String(correctVal ?? "?"),
       };
     });
 }
 
+/* ========= A6-3：生成分数专项练习 ========= */
+function generateFractionPractice(): PracticeItem[] {
+  return [
+    {
+      question: "1/3 + 1/6 = ?",
+      hint: "分母をそろえてから足しましょう。",
+      userAnswer: "",
+      isCorrect: null,
+    },
+    {
+      question: "3/4 - 1/8 = ?",
+      hint: "通分してから引き算します。",
+      userAnswer: "",
+      isCorrect: null,
+    },
+    {
+      question: "2/3 × 3/5 = ?",
+      hint: "分子どうし、分母どうしをかけます。",
+      userAnswer: "",
+      isCorrect: null,
+    },
+  ];
+}
+
+/* ========= 页面 ========= */
 const HomeworkCameraPage: React.FC = () => {
   const navigate = useNavigate();
-
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [items, setItems] = useState<CheckedItem[]>([]);
-  const [rawText, setRawText] = useState<string>("");
+  const [checked, setChecked] = useState<CheckedItem[]>([]);
+  const [practice, setPractice] = useState<PracticeItem[]>([]);
   const [loading, setLoading] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] ?? null;
     setFile(f);
     setPreview(f ? URL.createObjectURL(f) : null);
-    setItems([]);
-    setRawText("");
+    setChecked([]);
+    setPractice([]);
   };
 
   const handleCheck = async () => {
@@ -145,11 +145,30 @@ const HomeworkCameraPage: React.FC = () => {
       { timeout: 60000 }
     );
 
-    const text = res.data.raw_text ?? "";
-    setRawText(text);
-    setItems(text ? parseAndCheck(text) : []);
+    const result = res.data.raw_text ? parseAndCheck(res.data.raw_text) : [];
+    setChecked(result);
+
+    // 如果有分数错题，生成专项练习
+    const hasFractionMistake = result.some(
+      r => !r.isCorrect && (r.expression.includes("/") || r.studentAnswer.includes("/"))
+    );
+    setPractice(hasFractionMistake ? generateFractionPractice() : []);
 
     setLoading(false);
+  };
+
+  const answerPractice = (idx: number, value: string) => {
+    const q = practice[idx];
+    const correctVal = evalExpression(q.question.replace("= ?", ""));
+    const userVal = parseValue(value);
+    const isCorrect =
+      correctVal !== null &&
+      userVal !== null &&
+      Math.abs(correctVal - userVal) < 1e-6;
+
+    const next = [...practice];
+    next[idx] = { ...q, userAnswer: value, isCorrect };
+    setPractice(next);
   };
 
   return (
@@ -164,10 +183,7 @@ const HomeworkCameraPage: React.FC = () => {
         <input type="file" accept="image/*" onChange={handleFileChange} />
 
         {preview && (
-          <img
-            src={preview}
-            className="w-full max-h-80 object-contain bg-white rounded"
-          />
+          <img src={preview} className="w-full max-h-80 object-contain bg-white rounded" />
         )}
 
         <button
@@ -178,42 +194,44 @@ const HomeworkCameraPage: React.FC = () => {
           {loading ? "読み取り中…" : "この写真でチェック"}
         </button>
 
-        {/* ===== 一定显示 raw_text ===== */}
-        {rawText && (
-          <div className="bg-white border rounded p-3 text-sm whitespace-pre-wrap">
-            <div className="font-semibold mb-1">📄 読み取った文字</div>
-            {rawText}
+        {/* 原题判定 */}
+        {checked.map((c, i) => (
+          <div
+            key={i}
+            className={`border rounded-xl px-4 py-2 flex justify-between ${
+              c.isCorrect ? "bg-emerald-50" : "bg-red-50"
+            }`}
+          >
+            <span>{c.expression} = {c.studentAnswer}</span>
+            <span className="font-bold">{c.isCorrect ? "○" : "×"}</span>
           </div>
-        )}
+        ))}
 
-        {/* ===== 判定 / 兜底显示 ===== */}
-        {items.length > 0 && (
-          <div className="space-y-2">
-            <div className="font-semibold">🧮 判定結果</div>
-
-            {items.map((item, idx) => (
+        {/* A6-3 分数专项练习 */}
+        {practice.length > 0 && (
+          <div className="space-y-3 mt-4">
+            <div className="font-semibold">🧮 分数のれんしゅう</div>
+            {practice.map((p, i) => (
               <div
-                key={idx}
-                className={`border rounded-xl px-4 py-2 flex justify-between ${
-                  item.isCorrect === true
+                key={i}
+                className={`border rounded p-3 ${
+                  p.isCorrect === true
                     ? "bg-emerald-50"
-                    : item.isCorrect === false
+                    : p.isCorrect === false
                     ? "bg-red-50"
-                    : "bg-slate-100"
+                    : "bg-white"
                 }`}
               >
-                <span>
-                  {item.expression
-                    ? `${item.expression} = ${item.studentAnswer}`
-                    : item.rawLine}
-                </span>
-                <span className="font-bold">
-                  {item.isCorrect === true
-                    ? "○"
-                    : item.isCorrect === false
-                    ? "×"
-                    : "？"}
-                </span>
+                <div className="font-semibold">{p.question}</div>
+                <div className="text-xs text-slate-600 mb-1">💡 {p.hint}</div>
+                <input
+                  className="w-full border rounded px-2 py-1"
+                  value={p.userAnswer}
+                  onChange={e => answerPractice(i, e.target.value)}
+                  placeholder="答えを入力"
+                />
+                {p.isCorrect === true && <div>✔ 正解</div>}
+                {p.isCorrect === false && <div>✕ まちがい</div>}
               </div>
             ))}
           </div>
