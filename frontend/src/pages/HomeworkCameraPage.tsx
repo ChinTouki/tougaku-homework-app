@@ -43,11 +43,40 @@ function evalExpression(expr: string): number | null {
     return null;
   }
 }
+function normalizeOCR(text: string): string {
+  return text
+    // Unicode 分数 → 普通分数
+    .replace(/⅓/g, "1/3")
+    .replace(/⅔/g, "2/3")
+    .replace(/¼/g, "1/4")
+    .replace(/½/g, "1/2")
+    .replace(/¾/g, "3/4")
+    .replace(/⅛/g, "1/8")
+    .replace(/⅜/g, "3/8")
+    .replace(/⅝/g, "5/8")
+    .replace(/⅞/g, "7/8")
+
+    // 乘除号统一
+    .replace(/×/g, "*")
+    .replace(/x/g, "*")
+    .replace(/÷/g, "/")
+
+    // 全角等号
+    .replace(/＝/g, "=")
+
+    // 多余空格
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 
 /* ===== 解析 + 判题（允许失败） ===== */
 function parseAndCheck(raw: string): CheckedItem[] {
-  return raw
+  const normalizedRaw = normalizeOCR(raw);
+
+  return normalizedRaw
     .split("\n")
+
     .map(line => line.trim())
     .filter(line => line.length > 0)
     .map(line => {
